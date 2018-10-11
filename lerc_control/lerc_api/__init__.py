@@ -6,6 +6,7 @@ import json
 import atexit
 import logging
 import requests
+from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
 
@@ -22,12 +23,15 @@ class lerc_session():
         # tell the server we're done with the host
         if self.host:
             arguments = {'host': self.host, 'detach': True}
-            r = requests.post(self.server+'/command', cert=self.cert, params=arguments)
-            if r.status_code != requests.codes.ok:
-                self.logger.error(r.text)
+            try:
+                r = requests.post(self.server+'/command', cert=self.cert, params=arguments)
+                if r.status_code != requests.codes.ok:
+                    self.logger.error(r.text)
+                    return False
+                self.logger.debug("Session destroyed.")
+                return True
+            except:
                 return False
-            self.logger.debug("Detached from {}. Host's sleep cycle will be set back to default.".format(self.host))
-            return True
     
     def attach_host(self, host):
         if not host:
@@ -35,50 +39,46 @@ class lerc_session():
         if self.host and self.host != host:
             self._detach_host(self.server, self.host)
         self.host = host
-        self.logger.debug("attached to host '{}'".format(host))
+        self.logger.debug("attaching to host '{}'..".format(host))
 
     def __init__(self, profile='default', server=None, host=None, cid=None, chunk_size=4096):
         config = ConfigParser()
-        local_configpath = os.path.join(os.getcwd(),'.config','session.ini')
-        print(requests.__version__)
-        configpath = '/opt/lerc_control/.config/session.ini'
-        if local_configpath:
+        config_paths = []
+        config_paths.append(os.path.join(os.getcwd(),'.config','session.ini'))
+        config_paths.append('/opt/lerc_control/.config/session.ini')
+        config_paths.append('/opt/lerc/lerc_control/.config/session.ini')
+        for cp in config_paths:
             try:
-                config.read(local_configpath)
-                self.logger.debug("found local configuration file. Reading '{}' profile.".format(profile))
-            except Exception as e:
+                if os.path.exists(cp):
+                    config.read(cp)
+                    self.logger.debug("Reading config file at {}.".format(cp))
+                    break
+            except:
                 pass
         else:
-            try:
-                config.read(configpath)
-                self.logger.debug("Reading '{}' profile from default configuration file".format(profile))
-            except Exception as e:
-                self.logger.error("Could not find configuration file.")
-                raise Exception("Could not find configuration file.")
+            raise Exception("No configuration file defined along search paths: {}".format(config_paths))
         if not config.has_section(profile):
-            self.logger.error("No section named '{}' in configuration file".format(profile))
             raise Exception("No section named '{}' in configuration file".format(profile))
-
-        # this seems to only be neccessary for debian systems running in AWS 
-        if 'REQUESTS_CA_BUNDLE' not in os.environ:
-            self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
-            os.environ['REQUESTS_CA_BUNDLE'] = '/usr/local/share/ca-certificates/integral-ca.pem'
 
         if server:
             self.server = server
         else:
-            self.server = config.get(profile, 'server')
+            self.server = config[profile]['server']
         if not self.server.startswith('https://'):
             self.server = 'https://' + self.server
         if self.server[-1] == '/':
             self.server = self.server[:-1]
-        self.client_cert = config.get(profile, 'client_cert')
-        self.client_key = config.get(profile, 'client_key')
+        if 'server_ca_cert' in config[profile]:
+            self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
+            os.environ['REQUESTS_CA_BUNDLE'] = config[profile]['server_ca_cert']
+        self.client_cert = config[profile]['client_cert']
+        self.client_key = config[profile]['client_key']
         self.cert = (self.client_cert, self.client_key)
         self.attach_host(host)
         self.command = None
         self.cid = cid
         self.error = None
+        self.contained = False
         self.chunk_size = chunk_size
         atexit.register(self._detach_host)
 
@@ -103,7 +103,10 @@ class lerc_session():
                 self.cid = result['command_id']
                 return result
             else:
-                self.logger.error(result)
+                if 'error' not in result:
+                    raise Exception("Unexpected result: {}".format(result))
+                self.error = result['error']
+                self.logger.error(self.error)
                 return False
 
     def Run(self, shell_command):
@@ -111,11 +114,13 @@ class lerc_session():
         command = { "operation":"run", "command": shell_command }
         return self._issue_command(command)
 
-    def Download(self, server_file_path, client_file_path=None):
+    def Download(self, server_file_path, client_file_path=None, analyst_file_path=None):
         # Send file to endpoint - resume capable
         ## server_file_path - The server file to send to the client
         ## client_file_path - where the client should write the file, defaults to it's cwd
-        command = { "operation":"download", "server_file_path":server_file_path, "client_file_path":client_file_path }
+        ## analyst_file_path - path to the original file the analyst passed in - allows resume
+        command = { "operation":"download", "server_file_path":server_file_path,
+                    "client_file_path":client_file_path, "analyst_file_path":analyst_file_path}
         return self._issue_command(command) 
 
     def Upload(self, path):
@@ -143,7 +148,11 @@ class lerc_session():
         self.logger.debug("Trying to get command {}".format(self.cid))
         r = requests.get(self.server+'/command', cert=self.cert, params=arguments).json()
         if 'error' in r:
-            logger.warn("Server returned error message: {}".format(r['error']))
+            if 'message' in r: # server error
+                self.logger.error("{} : {}".format(r['message'], r['error']))
+            else: # error from client shouldn't be logged as errors here
+                #self.logger.error("{}".format(r['error']))
+                self.command = r
             return r
         if 'hostname' in r and self.host is None:
             self.attach_host(r['hostname'])
@@ -165,6 +174,13 @@ class lerc_session():
         if not self.cid:
             self.logger.error("No command has been attached to this session")
             return False
+
+        if self.command['operation'] == 'DOWNLOAD' or self.command['operation'] == 'QUIT':
+            self.logger.info("No results to get for '{}' operations".format(self.command['operation']))
+            return self.command
+        elif self.command['filesize'] == 0:
+            self.logger.info("Command complete. No output to collect.")
+            return self.command
 
         if chunk_size:
             self.chunk_size = chunk_size
@@ -190,7 +206,7 @@ class lerc_session():
                 r.raw.decode_content = True
                 with open(file_path, 'ba') as f:
                     for i in range(total_chunks):
-                        f.write(chunk)
+                        f.write(r.raw.read(self.chunk_size))
                     final_chunk = r.raw.read(remaining_bytes)
                     f.write(final_chunk)
                     f.close()
@@ -201,7 +217,7 @@ class lerc_session():
         filesize = os.stat(file_path).st_size
         if self.command['filesize'] == filesize:
             self.logger.info("Result file download complete. Wrote {}.".format(file_path))
-            return True
+            return self.command
         else:
             self.logger.info("Data stream closed prematurely. Have {}/{} bytes. Trying to resume..".
                               format(filesize, self.command['filesize']))
@@ -212,8 +228,6 @@ class lerc_session():
         if host:
             self.attach_host(host)
         r = requests.get(self.server+'/command', params={'host': self.host}, cert=self.cert).json()
-        if 'error' in r:
-            self.logger.warn("Server returned error message: {}".format(r['error']))
         return r
 
     def get_command_queue(self, host=None):
@@ -233,6 +247,10 @@ class lerc_session():
             return False
         if not self.cid:
             self.error = "No command id."
+            self.logger.error(self.error)
+            return False
+        if not os.path.exists(file_path):
+            self.error = "{} does not exists. Aborting.".format(file_path)
             self.logger.error(self.error)
             return False
         statinfo = os.stat(file_path)
@@ -263,9 +281,57 @@ class lerc_session():
                     return False
                 self.logger.info("Command {} PREPARING. Streaming file to server..".format(self.cid))
                 # function to stream file to server
-                command = self.stream_file(args.file_path, command['file_position'])
+                if not command['analyst_file_path']:
+                    self.error = "Can't resume upload to server, analyst_file_path is not defined"
+                    self.logger.error(self.error)
+                    return False
+                command = self.stream_file(command['analyst_file_path'], command['file_position'])
                 if 'warn' in command:
                     self.logger.warn(command['warn'])
             else:
                 self.logger.info("Command {} state: {}.".format(self.cid, command['status']))
                 return command
+
+    def contain(self):
+        # isolate a host with the windows firewall
+        # everything will be blocked but lerc's access outbound
+        """
+        netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound
+        netsh advfirewall firewall add rule name="LERC" dir=out action=allow program="C:\Program Files (x86)\Integral Defense\Live Endpoint Response Client\lerc.exe" enable=yes
+        netsh advfirewall set allprofiles state on
+        netsh advfirewall show allprofiles
+        """
+
+        # TODO: Drop a bat file to undo these changes and call it at the very end of the commands below -
+        # at the beggining of the bat file, pause for 60 seconds. See next TODO comment->
+
+        if self.contained:
+            return self.contained
+
+        self.logger.info("containing host..")
+        # TODO: drop the bat file that will pause for 60 seconds and then undo all firewall changes we make
+        self.Run('netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound && \
+                netsh advfirewall firewall add rule name="LERC" dir=out action=allow program="C:\\Program Files (x86)\\Integral Defense\\Live Endpoint Response Client\\lerc.exe" enable=yes && \
+                netsh advfirewall set allprofiles state on')
+        # TODO: self.Run("kill the bat file that should still be paused on the client (and then delete it?)")
+        # After the firewall changes are made, the host should check back in and get the command to kill the bat file
+        # If the host can not check back in, then, the bat file will un-do the firewall changes
+        # This should keep us from locking ourselves out of a client
+        self.wait_for_command(self.check_command())
+        self.logger.info("Host contained at: {}".format(datetime.now()))
+        self.logger.info("Getting firewall status for due diligence..")
+        self.Run('netsh advfirewall show allprofiles')
+        self.wait_for_command(self.check_command())
+        self.get_results(file_path = "{}_firewall_containment.txt".format(self.host))
+        self.contained = True
+        return self.contained
+
+    def release_containment(self):
+
+        self.Run("netsh advfirewall reset && netsh advfirewall show allprofiles")
+        self.wait_for_command(self.check_command())
+        self.logger.info("Host containment removed at: {}".format(datetime.now()))
+        self.logger.info("Getting firewall status for due diligence..")
+        self.get_results(file_path = "{}_firewall_reset.txt".format(self.host))
+        self.contained = False
+        return self.contained

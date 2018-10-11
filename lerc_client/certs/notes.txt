@@ -1,0 +1,9 @@
+If your control server is not signed by a trusted CA for whaterver reason, you can place the ca signing cert here and the client will trust any server certs signed by it.
+
+It's probably easiest to name the server signing cert "lerc.ca.pem" and the client cert for verification with the server "lerc.client.pfx". Otherwise, you will have to change the following lines of code to reflect your server names. This file is in the lercSetup folder.
+
+            "SourcePath" = "8:..\\certs\\lerc.client.pfx"
+            "TargetName" = "8:lerc.client.pfx"
+            "SourcePath" = "8:..\\certs\\lerc.ca.pem"
+            "TargetName" = "8:lerc.ca.pem"
+
