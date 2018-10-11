@@ -1,0 +1,38 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "lercLib", "lercLib\lercLib.csproj", "{F627444B-E15B-4C0C-9461-5AD45A07A114}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "lercConsole", "lercConsole\lercConsole.csproj", "{3BBC3314-FCF3-46A3-8B93-E2BE3A0CC0B8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "lercService", "lercService\lercService.csproj", "{75C11E28-5CF9-48BB-804B-834B87777371}"
+EndProject
+Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "lercSetup", "lercSetup\lercSetup.vdproj", "{EF06D25D-E656-4DCE-8A70-36FBB870FF4A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F627444B-E15B-4C0C-9461-5AD45A07A114}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F627444B-E15B-4C0C-9461-5AD45A07A114}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F627444B-E15B-4C0C-9461-5AD45A07A114}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F627444B-E15B-4C0C-9461-5AD45A07A114}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3BBC3314-FCF3-46A3-8B93-E2BE3A0CC0B8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3BBC3314-FCF3-46A3-8B93-E2BE3A0CC0B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3BBC3314-FCF3-46A3-8B93-E2BE3A0CC0B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3BBC3314-FCF3-46A3-8B93-E2BE3A0CC0B8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{75C11E28-5CF9-48BB-804B-834B87777371}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{75C11E28-5CF9-48BB-804B-834B87777371}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{75C11E28-5CF9-48BB-804B-834B87777371}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{75C11E28-5CF9-48BB-804B-834B87777371}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EF06D25D-E656-4DCE-8A70-36FBB870FF4A}.Debug|Any CPU.ActiveCfg = Debug
+		{EF06D25D-E656-4DCE-8A70-36FBB870FF4A}.Release|Any CPU.ActiveCfg = Release
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
