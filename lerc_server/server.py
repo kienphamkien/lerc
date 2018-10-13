@@ -1,19 +1,20 @@
 #!/usr/bin/python3
+#/opt/cRAT_server/cratenv/bin/python3
 
 import os
 import sys
 import json
-import enum
 import logging
 import configparser
-import clientInstructions as ci
 from datetime import datetime
 from flask_restful import Resource, Api
-from flask_sqlalchemy import SQLAlchemy
 from flask import Flask, request, jsonify, stream_with_context, Response, make_response
 
 # only used if we're runing the app natively
 from werkzeug.serving import WSGIRequestHandler
+
+import library.clientInstructions as ci
+from library.database import db, operationTypes, cmdStatusTypes, clientStatusTypes, Commands, Clients
 
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -35,20 +36,21 @@ config = configparser.ConfigParser()
 config.read(os.path.join(BASE_DIR, ETC_DIR, 'lerc_server.ini'))
 
 # globals and config items
-DEFAULT_SLEEP = int(config.get('lerc_server', 'default_client_sleep'))
-CHUNK_SIZE = int(config.get('lerc_server', 'chunk_size'))
-DB_server = config.get('lerc_server', 'dbserver')
-DB_user = config.get('lerc_server', 'dbuser')
-DB_userpass = config.get('lerc_server', 'dbuserpass')
+DEFAULT_CLIENT_DIR = config['lerc_server']['default_client_dir']
+DEFAULT_SLEEP = int(config['lerc_server']['default_client_sleep'])
+CHUNK_SIZE = int(config['lerc_server']['chunk_size'])
+DB_server = config['lerc_server']['dbserver']
+DB_user = config['lerc_server']['dbuser']
+DB_userpass = config['lerc_server']['dbuserpass']
 database_connect_string = "mysql+pymysql://{}:{}@{}/lerc".format(DB_user, DB_userpass, DB_server)
 
 # To handle the edgecase between HTTP/1.1 and WSGI spec
 UGLY_CHUNKSIZE = 1 # yep, 1 byte
 
-# Declare the app
+# Declare app, api, and initilize db
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = database_connect_string
-db = SQLAlchemy(app)
+db.init_app(app)
 api = Api(app)
 
 @app.before_request
@@ -89,108 +91,46 @@ fh.setFormatter(FORMAT)
 logger.addHandler(handler)
 logger.addHandler(fh)
 
-# Begin DB models #
-class operationTypes(enum.Enum):
-    RUN  = 'RUN'
-    UPLOAD = 'UPLOAD'
-    DOWNLOAD = 'DOWNLOAD'
-    QUIT = 'QUIT'
 
-class cmdStatusTypes(enum.Enum):
-    PENDING = 'PENDING'
-    COMPLETE = 'COMPLETE'
-    UNKNOWN = 'UNKNOWN'
-    ERROR = 'ERROR'
-    PREPARING = 'PREPARING' # file transfer between analysis <-> crat server
-
-class clientStatusTypes(enum.Enum):
-    ONLINE = 'ONLINE'
-    OFFLINE = 'OFFLINE'
-    UNKNOWN = 'UNKNOWN'
-
-class Commands(db.Model):
-    command_id = db.Column(db.Integer, primary_key = True)
-    hostname = db.Column(db.String(40))
-    operation = db.Column(db.Enum(operationTypes))
-    command = db.Column(db.String(1024))
-    file_position = db.Column(db.Integer)
-    filesize = db.Column(db.Integer)
-    client_file_path = db.Column(db.String(1024))
-    server_file_path = db.Column(db.String(1024))
-    status = db.Column(db.Enum(cmdStatusTypes)) 
-    log_file_path = db.Column(db.String(1024))
-
-    def __init__(self, hostname, operation, client_file_path=None, server_file_path=None, command=None):
-       self.hostname = hostname
-       self.operation = operation
-       self.client_file_path = client_file_path
-       self.server_file_path = server_file_path
-       self.command = command
-       if operation == operationTypes.DOWNLOAD:
-           self.status = cmdStatusTypes.PREPARING
-       else:
-           self.status = cmdStatusTypes.PENDING
-       self.file_position = 0
-       self.filesize = None
-       self.log_file_path = None
-
-    def to_dict(self):
-        return {'command_id': self.command_id,
-                'hostname': self.hostname,
-                'operation': self.operation.name,
-                'client_file_path': self.client_file_path,
-                'server_file_path': self.server_file_path,
-                'command': self.command,
-                'status': self.status.name,
-                'file_position': self.file_position,
-                'filesize': self.filesize,
-                'log_file_path': self.log_file_path}
-
-class Clients(db.Model):
-    hostname = db.Column(db.String(40), index=True, unique=True, primary_key = True)
-    status = db.Column(db.Enum(clientStatusTypes))
-    install_date = db.Column(db.DateTime)
-    company_id = db.Column(db.Integer)
-    last_activity = db.Column(db.DateTime)
-    sleep_cycle = db.Column(db.Integer)
-
-    def __init__(self, hostname, status=clientStatusTypes.ONLINE, install_date=datetime.now(), company_id=None, sleep_cycle=DEFAULT_SLEEP):
-        self.hostname = hostname
-        self.status = status
-        self.install_date = install_date
-        self.company_id = company_id
-        self.last_activity = datetime.now()
-        self.sleep_cycle = sleep_cycle
-
-    def to_dict(self):
-        return {'hostname': self.hostname,
-                'status': self.status.name,
-                'install_date': self.install_date.strftime('%Y-%m-%d %H:%M:%S'),
-                'company_id': self.company_id,
-                'last_activity': self.last_activity.strftime('%Y-%m-%d %H:%M:%S'),
-                'sleep_cycle': self.sleep_cycle}
-# End DB models #
-
-
-# begin helpers #
+# begin helper functions #
 class CustomRequestHandler(WSGIRequestHandler):
     # Just to log connections dropped when streaming a response
     def connection_dropped(self, error, environ=None):
         logging.warning('Connection dropped when streaming response data to client.')
 
-def host_check(host):
+def host_check(host, company):
     # known host?
     client = Clients.query.filter_by(hostname=host).first()
     if client is None:
-        new_client = Clients(host)
+        new_client = Clients(host, company_id=company, sleep_cycle=15)
         db.session.add(new_client)
         db.session.commit()
-        logger.info("Added {} to client table".format(host))
+        logger.info("Added {}/{} to client table".format(host, company))
+    elif client.status == clientStatusTypes.UNINSTALLED:
+        logger.info("Client being re-installed.")
+        client.status = clientStatusTypes.ONLINE
+        client.install_date = datetime.now()
+        client.last_activity = datetime.now()
+        client.company_id=company
+        client.sleep_cycle=15
+        db.session.commit()
+    elif client.company_id != company:
+        if client.company_id is None:
+            logger.info("setting company_id for {}".format(host))
+            client.company_id = company
+            client.status = clientStatusTypes.ONLINE
+            client.last_activity = datetime.now()
+            db.session.commit()
+            return True
+        logger.error("Company id mismatch for {}.".format(host))
+        client.status = clientStatusTypes.UNKNOWN
+        db.session.commit()
+        return False
     else:
         client.status = clientStatusTypes.ONLINE
         client.last_activity = datetime.now()
         db.session.commit()
-    return
+    return True
 
 def command_manager(host, remove_cid=None):
     if remove_cid:
@@ -215,6 +155,13 @@ def command_manager(host, remove_cid=None):
                     command.file_position = statinfo.st_size + 1
                     logger.warning("Updating database: More bytes found on server than recorded in database. Prior exception went unhandled or unnoticed. Probable connection drop and resume before server reached timeout")
                     db.session.commit()
+        elif command.operation == operationTypes.DOWNLOAD:
+            if '/' not in command.client_file_path:
+                ''' lerc.exe's writed files to c:\windows\system32 by defaut, so, change to DEFAULT_CLIENT_DIR
+                    if not specified by the analyst when the command was issued '''
+                command.client_file_path = DEFAULT_CLIENT_DIR + command.client_file_path
+                db.session.commit()
+                    
         return command
     return None
 
@@ -253,9 +200,15 @@ class Fetch(Resource):
         if 'host' not in request.args:
             logger.error("Malformed request")
             return None
+        if 'company' not in request.args:
+            logger.error("Malformed request")
+            return None
 
         host = request.args['host']
-        host_check(host)
+        company = request.args['company']
+        if not host_check(host, int(company)):
+            # if something is not right, always issue sleep
+            return ci.Sleep(DEFAULT_SLEEP)
         command = command_manager(host)
 
         if command:
@@ -269,7 +222,7 @@ class Fetch(Resource):
             elif command.operation == operationTypes.QUIT:
                 command.status = cmdStatusTypes.COMPLETE
                 client = Clients.query.filter_by(hostname=host).first()
-                client.status = clientStatusTypes.OFFLINE
+                client.status = clientStatusTypes.UNINSTALLED
                 db.session.commit()
                 return ci.Quit()
 
@@ -492,13 +445,15 @@ class Command(Resource):
             return make_response("Missing host argument", 400)
 
         host = request.args['host']
+        # make sure host exists in client tabel
+        client = Clients.query.filter_by(hostname=host).first()
+        if not client:
+            return {'status_code':'404',
+                    'message': "Not Found",
+                    'error': "No LERC client installed on a host by name '{}'.".format(host)}
+
         if 'detach' in request.args:
             # set the client's sleep time back to default
-            client = Clients.query.filter_by(hostname=host).first()
-            if not client:
-                return {'status_code':'418',
-                        'message': "I'm a teapot",
-                        'error': "'{}' does not exist.".format(host)} 
             client.sleep_cycle = DEFAULT_SLEEP
             db.session.commit()
             logger.debug("Analyst detched from '{}'. Set client back to default sleep cycle".format(host))
@@ -528,6 +483,7 @@ class Command(Resource):
         elif command['operation'].upper() == operationTypes.DOWNLOAD.name:
             new_command = Commands(host, operationTypes.DOWNLOAD,
                                    client_file_path=command['client_file_path'],
+                                   analyst_file_path=command['analyst_file_path'],
                                    server_file_path=DATA_DIR+command['server_file_path'])
             db.session.add(new_command)
             db.session.commit()
@@ -554,9 +510,9 @@ class Command(Resource):
             client = Clients.query.filter_by(hostname=request.args['host']).first()
             if not client:
                 logger.warn("No client by name '{}'".format(request.args['host']))
-                return {'status_code':'418',
-                        'message': "I'm a teapot",
-                        'error': "'{}' does not exist.".format(request.args['host'])}
+                return {'status_code':'404',
+                        'message': "Not Found",
+                        'error': "Client '{}' does not exist.".format(request.args['host'])}
             commands = Commands.query.filter_by(hostname=request.args['host'])
             return {'commands': [ command.to_dict() for command in commands ],
                     'client': client.to_dict()}
@@ -566,12 +522,17 @@ class Command(Resource):
         logger.debug("Analyst checking on command {}".format(cid))
         command = Commands.query.filter_by(command_id=cid).first()
         if not command:
-            return {'status_code':'418',
-                    'message': "I'm a teapot",
+            return {'status_code':'404',
+                    'message': "Not Found OR Gone",
                     'error': "Command id '{}' does not exist.".format(cid)}
 
         # update the host to check in more frequntly during this analyst session
         client = Clients.query.filter_by(hostname=command.hostname).one()
+        if client.status == clientStatusTypes.UNKNOWN:
+            return {'status_code': '409',
+                    'error': 'Client state UNKNOWN. Review Server logs.',
+                    'message': 'Conflict'}
+
         if client.sleep_cycle != 30:
             client.sleep_cycle = 30
             db.session.commit() 
@@ -601,8 +562,8 @@ class AnalystUpload(Resource):
         cid = request.args['cid']
         command = Commands.query.filter_by(hostname=host, command_id=cid).first()
         if not command:
-            return {'status_code':'418',
-                    'message': "I'm a teapot", 
+            return {'status_code':'404',
+                    'message': "Not Found", 
                     'error': "Command id '{}' does not exist.".format(cid)}
         command.filesize = int(request.args['filesize'])
 
@@ -658,12 +619,14 @@ class AnalystDownload(Resource):
 
         if 'cid' not in request.args:
             logger.warn("Malformed analyst download request")
-            return {'status_code': '400', 'message': 'missing command id'}
+            return {'status_code': '400',
+                    'message': 'Bad Request',
+                    'error': 'missing required arguments'}
         cid = request.args['cid']
         command = Commands.query.filter_by(command_id=cid).first()
         if not command:
-            return {'status_code':'418',
-                    'message': "I'm a teapot",
+            return {'status_code':'404',
+                    'message': "Not Found",
                     'error': "Command id '{}' does not exist.".format(cid)}
         if command.status != cmdStatusTypes.COMPLETE:
             result = command.to_dict()
