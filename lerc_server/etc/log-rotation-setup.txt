@@ -1,0 +1,14 @@
+
+Below is an example log rotate configuration that can be placed at /etc/logrotate.d/lerc_server:
+
+/opt/lerc/lerc_server/logs/server.log {
+    daily
+    missingok
+    rotate 24
+    notifempty
+    su cybersecurity cybersecurity
+    create 0640 cybersecurity cybersecurity
+    postrotate
+        service apache2 reload
+    endscript
+}
