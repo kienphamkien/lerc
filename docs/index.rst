@@ -28,11 +28,8 @@ Major Features
    :caption: Contents:
 
    protocol
-   client-build
-   server-install
-   architecture
+   build-install
    control-api
-   gotchas
 
 Indices and tables
 ==================
