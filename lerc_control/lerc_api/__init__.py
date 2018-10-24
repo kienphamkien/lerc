@@ -44,9 +44,9 @@ class lerc_session():
     def __init__(self, profile='default', server=None, host=None, cid=None, chunk_size=4096):
         config = ConfigParser()
         config_paths = []
-        config_paths.append(os.path.join(os.getcwd(),'.config','session.ini'))
-        config_paths.append('/opt/lerc_control/.config/session.ini')
-        config_paths.append('/opt/lerc/lerc_control/.config/session.ini')
+        config_paths.append(os.path.join(os.getcwd(),'etc','lerc.ini'))
+        config_paths.append('/opt/lerc_control/etc/lerc.ini')
+        config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
         for cp in config_paths:
             try:
                 if os.path.exists(cp):
