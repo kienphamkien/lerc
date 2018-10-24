@@ -7,7 +7,7 @@ CREATE TABLE clients (hostname VARCHAR(40), status enum('ONLINE','OFFLINE','UNKN
 CREATE UNIQUE INDEX host_x ON clients(hostname);
 
 CREATE TABLE company_mapping (name VARCHAR(128), id INT(11) NOT NULL AUTO_INCREMENT, PRIMARY KEY (id));
-INSERT INTO company_mapping SET name='example';
+INSERT INTO company_mapping SET name='default';
 
 GRANT ALL PRIVILEGES ON lerc . * TO 'lerc_user'@'localhost' IDENTIFIED BY 'password';
 
