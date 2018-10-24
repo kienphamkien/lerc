@@ -68,6 +68,10 @@ class lerc_session():
             self.server = 'https://' + self.server
         if self.server[-1] == '/':
             self.server = self.server[:-1]
+        if 'ignore_system_proxy' in config[profile]:
+            if config[profile].getboolean('ignore_system_proxy'):
+                if 'https_proxy' in os.environ:
+                    del os.environ['https_proxy']
         if 'server_ca_cert' in config[profile]:
             self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
             os.environ['REQUESTS_CA_BUNDLE'] = config[profile]['server_ca_cert']
