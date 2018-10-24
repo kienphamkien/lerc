@@ -6,11 +6,11 @@ Server Installation
 
 #. Create lerc user::
 
-  sudo adduser lerc
+    sudo adduser lerc
 
 #. Git the lerc files in `/opt/`::
 
-  cd /opt && sudo -E git clone https://github.com/seanmcfeely/lerc.git
+    cd /opt && sudo -E git clone https://github.com/seanmcfeely/lerc.git
 
 #. Edit your ``/opt/lerc/lerc_server/etc/lerc_server.conf`` file for your environment.
 

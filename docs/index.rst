@@ -29,9 +29,7 @@ Major Features
 
    protocol
    build-install
-   architecture
    control-api
-   gotchas
 
 Indices and tables
 ==================
