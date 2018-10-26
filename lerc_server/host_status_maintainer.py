@@ -21,6 +21,8 @@ config.read(os.path.join(BASE_DIR, ETC_DIR, 'lerc_server.ini'))
 DB_server = config['lerc_server']['dbserver']
 DB_user = config['lerc_server']['dbuser']
 DB_userpass = config['lerc_server']['dbuserpass']
+# offline_timeout = the ammount of time a host has been offline
+#     before we change its status to UNKNOWN
 offline_timeout = int(config['host_checker']['offline_timeout'])
 
 # Connect to Db
@@ -37,6 +39,7 @@ logging.propagate = False
 
 def status_update():
 
+    LOGGER.info("Running..")
     try:
         with db.cursor() as c:
             # hostname - status - install_date - last_activity - sleep_cycle - company_id
@@ -50,7 +53,7 @@ def status_update():
                         c.execute("UPDATE clients SET status='UNKNOWN' WHERE hostname='{}'".format(client['hostname']))
                         LOGGER.warning("Set {} to UNKNOWN: It's '{}' passed the configured offline timeout".format(client['hostname'],
                                                                                    str(away_time - timedelta(days=offline_timeout))))
-                    elif away_time > timedelta(seconds=client['sleep_cycle']):
+                    elif away_time > timedelta(seconds=client['sleep_cycle']+2): # add two seconds to account for small delays
                         c.execute("UPDATE clients SET status='OFFLINE' WHERE hostname='{}'".format(client['hostname']))
                         LOGGER.info("Set {} to OFFLINE: Exceeded it's next expected check-in by '{}'".format(client['hostname'],
                                                                          str(away_time - timedelta(seconds=client['sleep_cycle']))))
