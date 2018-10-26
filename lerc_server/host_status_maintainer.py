@@ -39,7 +39,6 @@ logging.propagate = False
 
 def status_update():
 
-    LOGGER.info("Running..")
     try:
         with db.cursor() as c:
             # hostname - status - install_date - last_activity - sleep_cycle - company_id
