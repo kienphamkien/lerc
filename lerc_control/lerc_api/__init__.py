@@ -10,9 +10,20 @@ from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
 
-#Live Endpoint Response Clients control session
-# This class is for interacting and managing the lerc clients and server
+
 class lerc_session():
+    """Represents a Live Endpoint Response Client and Server control session.
+    This class is for interacting and managing the LERC clients and server.
+
+    Optional arguments:
+
+    :profile: Specifiy a group or company to work with. These are defined in the lerc.ini config file.
+    :server: The name the LERC control server to work with. Default is read from the lerc.ini config file.
+    :host: A lerc client you want to auto-attach to by hostname.
+    :cid: An existing command id you want to work with.
+    :chunk_size: The chunk size to use when streaming files between a lerc_session and the LERC server
+
+    """
     host = None
     server = None
     command = None
@@ -34,6 +45,8 @@ class lerc_session():
                 return False
     
     def attach_host(self, host):
+        """ Attach to a LERC client by hostname. If a host is already attached to this lerc_session, it will first be detached.
+        """
         if not host:
             return None
         if self.host and self.host != host:
@@ -109,9 +122,13 @@ class lerc_session():
                 self.logger.error(self.error)
                 return False
 
-    def Run(self, shell_command):
-        # execute a shell command on the host
-        command = { "operation":"run", "command": shell_command }
+    def Run(self, shell_command, async=False):
+        """Execute a shell command on the host.
+
+        :shell_command: The command to run on the host
+        :async: If ``True``, the LERC client will stream any stderr/stdout back to the LERC server and wait until the command completes. DEFAULT = ``False``.
+        """
+        command = { "operation":"run", "command": shell_command, "async": async }
         return self._issue_command(command)
 
     def Download(self, server_file_path, client_file_path=None, analyst_file_path=None):

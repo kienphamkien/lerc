@@ -3,6 +3,15 @@ Control API
 
 The control API can be used to issue commands to clients, download command results, check the status of commands or clients, isolate clients via the windows firewall, and more.
 
+Setup
+-----
+
+LERC API
+--------
+
+.. autoclass:: lerc_control.lerc_api.lerc_session
+    :members:
+
 LERC User Interface
 -------------------
 
@@ -42,4 +51,6 @@ Killing a process and deleting dir
 
 Below, using ``lerc_ui.py`` to tell the client on host "WIN1234" to run a shell command that will kill `360bdoctor.exe`, change director to the directory where the application is installed, delete the contents of that directory, and then print the directory contents. The result of this command should return an emptry directory.
 
-``$ lerc_ui.py WIN1234 run 'taskkill /IM 360bdoctor.exe /F && cd "C:\Users\bond007\AppData\Roaming\360se6\Application\" && del /S /F /Q "C:\Users\bond007\AppData\Roaming\360se6\Application\*" && dir'``
+::
+
+    $ lerc_ui.py WIN1234 run 'taskkill /IM 360bdoctor.exe /F && cd "C:\Users\bond007\AppData\Roaming\360se6\Application\" && del /S /F /Q "C:\Users\bond007\AppData\Roaming\360se6\Application\*" && dir'
