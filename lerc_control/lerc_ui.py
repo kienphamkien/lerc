@@ -7,11 +7,10 @@ import argparse
 import logging
 import coloredlogs
 import pprint
-#from pprint import pformat
 
-#from lerc_api import lerc_session
 import lerc_api
-# import config with server address, ssl cert for verification
+
+from configparser import ConfigParser
 
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
@@ -22,13 +21,41 @@ logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 logging.getLogger('lerc_api').setLevel(logging.INFO)
 
 logger = logging.getLogger('lerc_ui')
-coloredlogs.install(level='DEBUG', logger=logger)
+coloredlogs.install(level='INFO', logger=logger)
+
+
+def load_config(profile='default'):
+    config = ConfigParser()
+    config_paths = []
+    config_paths.append(os.path.join(os.getcwd(),'etc','lerc.ini'))
+    config_paths.append('/opt/lerc_control/etc/lerc.ini')
+    config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
+    for cp in config_paths:
+        try:
+            if os.path.exists(cp):
+                config.read(cp)
+                logger.debug("Reading config file at {}.".format(cp))
+                break
+        except:
+            pass
+    else:
+        logger.critical("No configuration file defined along search paths: {}".format(config_paths))
+
+    try:
+        config[profile]
+    except:
+        logger.critical("No section named '{}' in configuration file".format(profile))
+        sys.exit(1)
+    return config
 
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="User interface to the LERC control server")
     parser.add_argument('hostname', help="the host you'd like to work with")
+    parser.add_argument('-q', '--queue', action="store_true", help="return the entire command queue (despite status)")
+    parser.add_argument('-e', '--environment', action="store", help="specify an environment to work with. Default='default'")
+    parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG")
 
     subparsers = parser.add_subparsers(dest='instruction') #title='subcommands', help='additional help')
 
@@ -59,9 +86,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # route direct
-    if 'https_proxy' in os.environ:
-        del os.environ['https_proxy']
+    if args.debug:
+        logging.getLogger('lerc_api').setLevel(logging.DEBUG)
+        coloredlogs.install(level='DEBUG', logger=logger)
+
+    profile=args.environment if args.environment else 'default'
+    config = load_config(profile)
+    if 'ignore_system_proxy' in config[profile]:
+        if config[profile].getboolean('ignore_system_proxy'):
+            # route direct
+            if 'https_proxy' in os.environ:
+                del os.environ['https_proxy']
 
     host = args.hostname
 
@@ -107,7 +142,7 @@ if __name__ == "__main__":
         if command:
             pprint.pprint(command)
         sys.exit()
-    else:
+    elif args.queue:
         result = ls.get_command_queue()
         if 'error' in result:
             logger.error('\n{}'.format(pprint.pformat(result)))
@@ -116,6 +151,12 @@ if __name__ == "__main__":
             print("This host doesn't have any command history.")
         for command in result:
             pprint.pprint(command)
+        print()
+        sys.exit()
+    else:
+        result = ls.check_host()
+        if 'client' in result:
+            pprint.pprint(result['client'])
         print()
         sys.exit()
 

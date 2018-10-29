@@ -57,9 +57,9 @@ class lerc_session():
     def __init__(self, profile='default', server=None, host=None, cid=None, chunk_size=4096):
         config = ConfigParser()
         config_paths = []
-        config_paths.append(os.path.join(os.getcwd(),'.config','session.ini'))
-        config_paths.append('/opt/lerc_control/.config/session.ini')
-        config_paths.append('/opt/lerc/lerc_control/.config/session.ini')
+        config_paths.append(os.path.join(os.getcwd(),'etc','lerc.ini'))
+        config_paths.append('/opt/lerc_control/etc/lerc.ini')
+        config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
         for cp in config_paths:
             try:
                 if os.path.exists(cp):
@@ -81,6 +81,10 @@ class lerc_session():
             self.server = 'https://' + self.server
         if self.server[-1] == '/':
             self.server = self.server[:-1]
+        if 'ignore_system_proxy' in config[profile]:
+            if config[profile].getboolean('ignore_system_proxy'):
+                if 'https_proxy' in os.environ:
+                    del os.environ['https_proxy']
         if 'server_ca_cert' in config[profile]:
             self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
             os.environ['REQUESTS_CA_BUNDLE'] = config[profile]['server_ca_cert']
