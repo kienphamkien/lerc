@@ -113,9 +113,12 @@ class lerc_session():
                 self.logger.error(self.error)
                 return False
 
-    def Run(self, shell_command):
-        # execute a shell command on the host
-        command = { "operation":"run", "command": shell_command }
+    def Run(self, shell_command, async=True):
+        """Execute a shell command on the host.
+        :shell_command: The command to run on the host
+        :async: If ``True``, the LERC client will stream any stderr/stdout back to the LERC server and wait until the command completes. DEFAULT=``False``.
+        """
+        command = { "operation":"run", "command": shell_command, "async": async }
         return self._issue_command(command)
 
     def Download(self, server_file_path, client_file_path=None, analyst_file_path=None):
@@ -267,8 +270,8 @@ class lerc_session():
                     yield data
                     data = f.read(4096)
                 #break
-        self.command = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen()).json()
-        return self.command
+        self.command = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen())
+        return self.command.json()
 
     def wait_for_command(self, command):
         # command - dict representation of a lerc command
@@ -313,10 +316,14 @@ class lerc_session():
             return self.contained
 
         self.logger.info("containing host..")
+        status = self.check_host()
+        status = status['client']
+        self.logger.warn(status['sleep_cycle'])
         # TODO: drop the bat file that will pause for 60 seconds and then undo all firewall changes we make
         self.Run('netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound && \
                 netsh advfirewall firewall add rule name="LERC" dir=out action=allow program="C:\\Program Files (x86)\\Integral Defense\\Live Endpoint Response Client\\lerc.exe" enable=yes && \
-                netsh advfirewall set allprofiles state on')
+                netsh advfirewall set allprofiles state on && TIMEOUT /T {} /NOBREAK && \
+                netsh advfirewall reset && netsh advfirewall show allprofiles'.format(status['sleep_cycle']))
         # TODO: self.Run("kill the bat file that should still be paused on the client (and then delete it?)")
         # After the firewall changes are made, the host should check back in and get the command to kill the bat file
         # If the host can not check back in, then, the bat file will un-do the firewall changes

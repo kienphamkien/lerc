@@ -21,7 +21,7 @@ logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 logging.getLogger('lerc_api').setLevel(logging.INFO)
 
 logger = logging.getLogger('lerc_ui')
-coloredlogs.install(level='INFO', logger=logger)
+coloredlogs.install(level='DEBUG', logger=logger)
 
 
 def load_config(profile='default'):

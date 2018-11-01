@@ -188,6 +188,7 @@ def main(argv):
                         help='specify an environment you want to work with.')
 
     parser.add_argument('hostname', help="the name of the host to deploy the client to")
+    parser.add_argument('-p', '--package', help="the msi lerc package to install")
     args = parser.parse_args()
 
     print(time.ctime() + "... starting")
@@ -197,6 +198,8 @@ def main(argv):
     del os.environ['https_proxy']
 
     default_lerc_path = '/opt/lerc_control/lercSetup.msi'
+    if args.package:
+        default_lerc_path = args.package
 
     # lazy hack
     default_profile = auth.default_profile
@@ -205,7 +208,7 @@ def main(argv):
 
     cb = CbResponseAPI(profile=args.company) 
 
-    result = deploy_lerc(cb, args.hostname, config['lerc_install_cmd'])
+    result = deploy_lerc(cb, args.hostname, config['lerc_install_cmd'], lerc_installer_path=default_lerc_path)
     if result:
         print()
         pprint.pprint(result['client'], indent=4)
