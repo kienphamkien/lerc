@@ -16,6 +16,8 @@ namespace lercLib
         // run instruction parameters
         [DataMember]
         public string command;
+        [DataMember]
+        public bool async;
 
         // download/upload parameters
         [DataMember]
@@ -39,7 +41,7 @@ namespace lercLib
                     lerc.DownloadFile(id, path);
                     break;
                 case "run":
-                    lerc.PipeCommandOutput(id, command);
+                    lerc.RunCommand(id, command, async);
                     break;
                 case "sleep":
                     Thread.Sleep(seconds * 1000);

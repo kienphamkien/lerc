@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.Configuration;
 using System.Diagnostics;
@@ -7,6 +8,7 @@ using System.Net;
 using System.Net.Security;
 using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Threading;
 
 namespace lercLib
@@ -66,24 +68,28 @@ namespace lercLib
         {
             // read config
             config = new StringDictionary();
+            string exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            string configPath = Path.Combine(exeDir, "config.txt");
 
-            try
+            if (File.Exists(configPath))
             {
-                string exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                using (StreamReader sr = new StreamReader(Path.Combine(exeDir, "config.txt")))
+                try
                 {
-                    string line;
-                    while ((line = sr.ReadLine()) != null)
+                    using (StreamReader sr = new StreamReader(configPath))
                     {
-                        char[] delimeters = new char[1] { ':' };
-                        string[] kv = line.Split(delimeters, 2);
-                        config.Add(kv[0], kv[1].Trim());
+                        string line;
+                        while ((line = sr.ReadLine()) != null)
+                        {
+                            char[] delimeters = new char[1] { ':' };
+                            string[] kv = line.Split(delimeters, 2);
+                            config.Add(kv[0], kv[1].Trim());
+                        }
                     }
                 }
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error: Failed to load config: " + e.Message);
+                catch (Exception e)
+                {
+                    Log.Error("Error: Failed to load config: " + e.Message);
+                }
             }
         }
 
@@ -178,7 +184,6 @@ namespace lercLib
                     request.ClientCertificates.Add(clientCertificate);
                     request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
                     request.Method = "GET";
-                    request.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.BypassCache);
                     ClearServicePointCache(request.ServicePoint);
 
                     HttpWebResponse response = (HttpWebResponse)request.GetResponse();
@@ -235,50 +240,102 @@ namespace lercLib
             }
             catch { } // ignore further errors
         }
-
-        // runs a shell command and pipes the output back to the server
-        public static void PipeCommandOutput(string id, string command)
+        
+        // runs a shell command and optionally pipes the output back to the server
+        public static void RunCommand(string id, string command, bool async)
         {
-            string uri = lastServerUsed + "pipe?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id;
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
+            string uri;
+            HttpWebRequest request;
+
+            // run the command
+            Process cmd = new Process();
+            cmd.StartInfo.FileName = "cmd.exe";
+            cmd.StartInfo.Arguments = "/C " + command;
+            cmd.StartInfo.CreateNoWindow = true;
+            cmd.StartInfo.UseShellExecute = false;
+
+            if (async)
+            {
+                cmd.Start();
+            }
+            else
+            {
+                ConcurrentQueue<string> output = new ConcurrentQueue<string>();
+                DataReceivedEventHandler QueueOutput = new DataReceivedEventHandler((sender, e) => {
+                    if (e.Data != null) { output.Enqueue(e.Data + "\n"); }
+                });
+                cmd.StartInfo.RedirectStandardInput = true;
+                cmd.StartInfo.RedirectStandardOutput = true;
+                cmd.StartInfo.RedirectStandardError = true;
+                cmd.OutputDataReceived += QueueOutput;
+                cmd.ErrorDataReceived += QueueOutput;
+                cmd.Start();
+                cmd.BeginErrorReadLine();
+                cmd.BeginOutputReadLine();
+
+                int lastSendTime = Environment.TickCount;
+                while (!cmd.HasExited || !output.IsEmpty)
+                {
+                    using (MemoryStream buffer = new MemoryStream())
+                    {
+                        while (!output.IsEmpty)
+                        {
+                            string line;
+                            if (output.TryDequeue(out line))
+                            {
+                                byte[] data = Encoding.UTF8.GetBytes(line);
+                                buffer.Write(data, 0, data.Length);
+                                buffer.Flush();
+                            }
+                        }
+
+                        buffer.Seek(0, SeekOrigin.Begin);
+                        if (buffer.Length > 0 || lastSendTime + 60000 < Environment.TickCount)
+                        {
+                            lastSendTime = Environment.TickCount;
+
+                            string company = ConfigGetString("company", "0");
+                            uri = lastServerUsed + "pipe?host=" + host + "&company=" + company + "&id=" + id + "&size=" + buffer.Length + "&done=false";
+                            request = (HttpWebRequest)WebRequest.Create(uri);
+                            request.ClientCertificates.Add(clientCertificate);
+                            request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
+                            request.Method = "POST";
+                            request.AllowWriteStreamBuffering = false;
+                            request.SendChunked = true;
+                            ClearServicePointCache(request.ServicePoint);
+
+                            using (Stream requestStream = request.GetRequestStreamWithTimeout())
+                            {
+                                int chunksize = ConfigGetInt("chunksize", 2048);
+                                byte[] data = new byte[chunksize];
+                                int bytesRead;
+                                while ((bytesRead = buffer.Read(data, 0, chunksize)) > 0)
+                                {
+                                    requestStream.Write(data, 0, bytesRead);
+                                    requestStream.Flush();
+                                }
+                            }
+
+                            // wait for response
+                            request.GetResponseWithTimeout();
+                        }
+                        Thread.Sleep(1000);
+                    }
+                }
+            }
+
+            // inform that the command is done
+            uri = lastServerUsed + "pipe?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id + "&size=0&done=true";
+            request = (HttpWebRequest)WebRequest.Create(uri);
             request.ClientCertificates.Add(clientCertificate);
             request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
             request.Method = "POST";
             request.AllowWriteStreamBuffering = false;
             request.SendChunked = true;
-            request.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.BypassCache);
             ClearServicePointCache(request.ServicePoint);
 
-            using (StreamWriter requestStream = new StreamWriter(request.GetRequestStreamWithTimeout()))
+            using (Stream requestStream = request.GetRequestStreamWithTimeout())
             {
-                // run the command
-                Process cmd = new Process();
-                cmd.StartInfo.FileName = "cmd.exe";
-                cmd.StartInfo.Arguments = "/C " + command;
-                cmd.StartInfo.RedirectStandardInput = true;
-                cmd.StartInfo.RedirectStandardOutput = true;
-                cmd.StartInfo.CreateNoWindow = true;
-                cmd.StartInfo.UseShellExecute = false;
-                cmd.Start();
-
-                try
-                {
-                    // stream command ouput to server in chunks
-                    int chunksize = ConfigGetInt("chunksize", 2048);
-                    char[] data = new char[chunksize];
-                    while (!cmd.StandardOutput.EndOfStream)
-                    {
-                        int bytesRead = cmd.StandardOutput.Read(data, 0, chunksize);
-                        requestStream.Write(data, 0, bytesRead);
-                        requestStream.Flush();
-                    }
-                }
-                catch (Exception e)
-                {
-                    // something broke
-                    cmd.Kill(); // kill the process
-                    throw e; // raise exception so an error can be logged and sent to the server
-                }
             }
 
             // wait for response
