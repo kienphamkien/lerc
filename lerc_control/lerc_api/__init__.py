@@ -10,9 +10,20 @@ from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
 
-#Live Endpoint Response Clients control session
-# This class is for interacting and managing the lerc clients and server
+
 class lerc_session():
+    """Represents a Live Endpoint Response Client and Server control session.
+    This class is for interacting and managing the LERC clients and server.
+
+    Optional arguments:
+
+    :profile: Specifiy a group or company to work with. These are defined in the lerc.ini config file.
+    :server: The name the LERC control server to work with. Default is read from the lerc.ini config file.
+    :host: A lerc client you want to auto-attach to by hostname.
+    :cid: An existing command id you want to work with.
+    :chunk_size: The chunk size to use when streaming files between a lerc_session and the LERC server
+
+    """
     host = None
     server = None
     command = None
@@ -34,6 +45,8 @@ class lerc_session():
                 return False
     
     def attach_host(self, host):
+        """ Attach to a LERC client by hostname. If a host is already attached to this lerc_session, it will first be detached.
+        """
         if not host:
             return None
         if self.host and self.host != host:
@@ -44,9 +57,9 @@ class lerc_session():
     def __init__(self, profile='default', server=None, host=None, cid=None, chunk_size=4096):
         config = ConfigParser()
         config_paths = []
-        config_paths.append(os.path.join(os.getcwd(),'.config','session.ini'))
-        config_paths.append('/opt/lerc_control/.config/session.ini')
-        config_paths.append('/opt/lerc/lerc_control/.config/session.ini')
+        config_paths.append(os.path.join(os.getcwd(),'etc','lerc.ini'))
+        config_paths.append('/opt/lerc_control/etc/lerc.ini')
+        config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
         for cp in config_paths:
             try:
                 if os.path.exists(cp):
@@ -68,6 +81,10 @@ class lerc_session():
             self.server = 'https://' + self.server
         if self.server[-1] == '/':
             self.server = self.server[:-1]
+        if 'ignore_system_proxy' in config[profile]:
+            if config[profile].getboolean('ignore_system_proxy'):
+                if 'https_proxy' in os.environ:
+                    del os.environ['https_proxy']
         if 'server_ca_cert' in config[profile]:
             self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
             os.environ['REQUESTS_CA_BUNDLE'] = config[profile]['server_ca_cert']
@@ -109,32 +126,46 @@ class lerc_session():
                 self.logger.error(self.error)
                 return False
 
-    def Run(self, shell_command):
-        # execute a shell command on the host
-        command = { "operation":"run", "command": shell_command }
+    def Run(self, shell_command, async=False):
+        """Execute a shell command on the host.
+
+        :param str shell_command: The command to run on the host
+        :param bool async: (optional) ``False``: LERC client will stream any results and  wait until for completion. ``True``: Execute the command and return immediately.
+        """
+        command = { "operation":"run", "command": shell_command, "async": async }
         return self._issue_command(command)
 
     def Download(self, server_file_path, client_file_path=None, analyst_file_path=None):
-        # Send file to endpoint - resume capable
-        ## server_file_path - The server file to send to the client
-        ## client_file_path - where the client should write the file, defaults to it's cwd
-        ## analyst_file_path - path to the original file the analyst passed in - allows resume
+        """Instruct a client to download a file. The file will be streamed to the server if the server doesn't have it yet. The streamed to the client.
+
+        :param str server_file_path: The path to the file that you want the client to download.
+        :param str client_file_path: (optional) where the client should write the file, defaults to lerc.ini specification or server default if not defined in config.
+        :param str analyst_file_path: (optional) path to the original file the analyst - This allows an analyst to resume a transfer between a lerc_session and the server.
+        """
         command = { "operation":"download", "server_file_path":server_file_path,
                     "client_file_path":client_file_path, "analyst_file_path":analyst_file_path}
         return self._issue_command(command) 
 
     def Upload(self, path):
-        # upload file from endpoint to server
-        ## path - The path on the endpoint to read the data from
+        """Upload a file from client to server. The file will be streamed to the server and then streamed to the lerc_session.
+
+        :param str path: The path to the file, on the endpoint
+        """
         command = { "operation":"upload", "client_file_path":path }
         return self._issue_command(command)
 
     def Quit(self):
-        # tells the endpoint to close the lerc executable and disable auto start.
+        """The Quit command tells the LERC client to uninstall itself from the endpoint.
+        """
         command = { "operation":"quit" }
         return self._issue_command(command)
 
     def check_command(self, cid=None):
+        """Check on a specific command by id. If a command id is not specifed, whatever cid the lerc_session is currently attached to will be used.
+
+        :param int cid: (optional) The Id of a command you want to get the status of.
+        :return: Dictionary representation of a command
+        """
         if self.cid is None:
             if  cid is None:
                 self.error = "No command id to check"
@@ -161,8 +192,13 @@ class lerc_session():
         return self.command
 
     def get_results(self, cid=None, file_path=None, chunk_size=None):
-        # get any results available for a command
-        ## file_path - the path to write the results. default: write the server file name to current dir
+        """Get any results available for a command. If cid is None, any cid currently assigned to the lerc_session will be used.
+
+        :param int cid: (optional) The Id of a command to work with.
+        :param str file_path: (optional) The path to write the results. default: <hostname>_<cid>_filename to current dir.
+        :param int chunk_size: (optional) Specify the size of the chunks (bytes) to stream with the server
+        :return: Any results returned by a Run command or a file collected from a client 
+        """
         if cid and self.cid:
             if cid != self.cid:
                 self.logger.warn("Updating self with current status of the command id passed")
@@ -225,13 +261,23 @@ class lerc_session():
         return None
 
     def check_host(self, host=None):
+        """Get the status of a client by hostname.
+
+        :param str host: (optional) The hostname of a lerc client.
+        :return: A lerc client summary
+        :rtype: dict
+        """
         if host:
             self.attach_host(host)
         r = requests.get(self.server+'/command', params={'host': self.host}, cert=self.cert).json()
         return r
 
     def get_command_queue(self, host=None):
-        # return a hosts command queue
+        """Get the entire command queue for a lerc client by hostname.
+
+        :param str host: (optional) The hostname of a lerc client.
+        :return: A list of commands for a client, each list entry is a dictionary representation of a command
+        """
         r = self.check_host(host)
         if 'commands' in r:
             return r['commands']
@@ -267,7 +313,11 @@ class lerc_session():
         return self.command
 
     def wait_for_command(self, command):
-        # command - dict representation of a lerc command
+        """Wait for a command to complete by continously querying for its status to change to 'COMPLETE' with the server.
+
+        :param str command: A dictionary representation of a lerc command.
+        :return: Any results returned by a Run command or a file that was collected off of a client 
+        """
         while command:
             status = command['status']
             if status == 'PENDING': # we wait
@@ -293,14 +343,16 @@ class lerc_session():
                 return command
 
     def contain(self):
-        # isolate a host with the windows firewall
-        # everything will be blocked but lerc's access outbound
+        """Use the windows firewall to isolate a host. Everything will be blocked but lerc's access outbound. You must attach to a host before using contain.
+
+        :return: True on success
         """
+        '''
         netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound
         netsh advfirewall firewall add rule name="LERC" dir=out action=allow program="C:\Program Files (x86)\Integral Defense\Live Endpoint Response Client\lerc.exe" enable=yes
         netsh advfirewall set allprofiles state on
         netsh advfirewall show allprofiles
-        """
+        '''
 
         # TODO: Drop a bat file to undo these changes and call it at the very end of the commands below -
         # at the beggining of the bat file, pause for 60 seconds. See next TODO comment->
@@ -327,11 +379,14 @@ class lerc_session():
         return self.contained
 
     def release_containment(self):
+        """Release containment on client.
 
+        :return: True on success.
+        """
         self.Run("netsh advfirewall reset && netsh advfirewall show allprofiles")
         self.wait_for_command(self.check_command())
         self.logger.info("Host containment removed at: {}".format(datetime.now()))
         self.logger.info("Getting firewall status for due diligence..")
         self.get_results(file_path = "{}_firewall_reset.txt".format(self.host))
         self.contained = False
-        return self.contained
+        return not self.contained
