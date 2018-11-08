@@ -197,7 +197,7 @@ def main(argv):
     del os.environ['http_proxy']
     del os.environ['https_proxy']
 
-    default_lerc_path = '/opt/lerc_control/lercSetup.msi'
+    default_lerc_path = '/opt/lerc/lercSetup.msi'
     if args.package:
         default_lerc_path = args.package
 

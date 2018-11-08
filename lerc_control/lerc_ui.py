@@ -61,6 +61,7 @@ if __name__ == "__main__":
 
     parser_run = subparsers.add_parser('run', help="Run a shell command on the host. BE CAREFUL!")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
+    parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
     parser_upload.add_argument('file_path', help='the file path on the client')
@@ -104,7 +105,11 @@ if __name__ == "__main__":
 
     result = None
     if args.instruction == 'run':
-        result = ls.Run(args.command)
+        if args.async:
+            print(args.async)
+            result = ls.Run(args.command, async=args.async)
+        else:
+            result = ls.Run(args.command)
 
     elif args.instruction == 'contain':
         if args.on:
@@ -115,7 +120,6 @@ if __name__ == "__main__":
     elif args.instruction == 'download':
         # if client_file_path is not specified the client will write the file to it's local dir
         analyst_file_path = os.path.abspath(args.file_path)
-        print(analyst_file_path)
         file_name = args.file_path[args.file_path.rfind('/')+1:]
         if args.local_file is None:
             args.local_file = file_name

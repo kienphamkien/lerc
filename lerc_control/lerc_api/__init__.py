@@ -50,7 +50,7 @@ class lerc_session():
         if not host:
             return None
         if self.host and self.host != host:
-            self._detach_host(self.server, self.host)
+            self._detach_host()
         self.host = host
         self.logger.debug("attaching to host '{}'..".format(host))
 
@@ -133,18 +133,21 @@ class lerc_session():
         :param bool async: (optional) ``False``: LERC client will stream any results and  wait until for completion. ``True``: Execute the command and return immediately.
         """
         command = { "operation":"run", "command": shell_command, "async": async }
-        return self._issue_command(command)
+        self._issue_command(command)
+        return self.check_command()
 
     def Download(self, server_file_path, client_file_path=None, analyst_file_path=None):
         """Instruct a client to download a file. The file will be streamed to the server if the server doesn't have it yet. The streamed to the client.
 
         :param str server_file_path: The path to the file that you want the client to download.
         :param str client_file_path: (optional) where the client should write the file, defaults to lerc.ini specification or server default if not defined in config.
-        :param str analyst_file_path: (optional) path to the original file the analyst - This allows an analyst to resume a transfer between a lerc_session and the server.
+        :param str analyst_file_path: (optional) path to the original file the analyst - This allows an analyst to resume a transfer between a lerc_session and the server. Neccessary for streaming the file to the server, if the server does not already have it
         """
         command = { "operation":"download", "server_file_path":server_file_path,
                     "client_file_path":client_file_path, "analyst_file_path":analyst_file_path}
-        return self._issue_command(command) 
+
+        self._issue_command(command)
+        return self.stream_file(analyst_file_path)
 
     def Upload(self, path):
         """Upload a file from client to server. The file will be streamed to the server and then streamed to the lerc_session.
@@ -152,13 +155,15 @@ class lerc_session():
         :param str path: The path to the file, on the endpoint
         """
         command = { "operation":"upload", "client_file_path":path }
-        return self._issue_command(command)
+        self._issue_command(command)
+        return self.check_command()
 
     def Quit(self):
         """The Quit command tells the LERC client to uninstall itself from the endpoint.
         """
         command = { "operation":"quit" }
-        return self._issue_command(command)
+        self._issue_command(command)
+        return self.check_command()
 
     def check_command(self, cid=None):
         """Check on a specific command by id. If a command id is not specifed, whatever cid the lerc_session is currently attached to will be used.
@@ -242,8 +247,12 @@ class lerc_session():
                 r.raw.decode_content = True
                 with open(file_path, 'ba') as f:
                     for i in range(total_chunks):
+                        if self.command['operation'] == 'RUN':
+                            print(r.raw.read(self.chunk_size).decode('utf-8'))
                         f.write(r.raw.read(self.chunk_size))
                     final_chunk = r.raw.read(remaining_bytes)
+                    if self.command['operation'] == 'RUN':
+                        print(final_chunk.decode('utf-8'))
                     f.write(final_chunk)
                     f.close()
             except Exception as e:
@@ -260,6 +269,7 @@ class lerc_session():
             self.get_results()
         return None
 
+
     def check_host(self, host=None):
         """Get the status of a client by hostname.
 
@@ -271,6 +281,18 @@ class lerc_session():
             self.attach_host(host)
         r = requests.get(self.server+'/command', params={'host': self.host}, cert=self.cert).json()
         return r
+
+    def get_hosts(self):
+        """Yeild dictionary representations of lerc clients.
+        """
+        host_id = 0
+        r = requests.get(self.server+'/command', params={'hid': host_id}, cert=self.cert).json()
+        # there is no host by id 0, but when you query the server for a hid that doesn't exsit,
+        # the response will be an error, that also contains a list of the valid host ids
+        hids = r['host_ids']
+        for host_id in hids:
+            r = requests.get(self.server+'/command', params={'hid': host_id}, cert=self.cert).json()
+            yield r
 
     def get_command_queue(self, host=None):
         """Get the entire command queue for a lerc client by hostname.
@@ -314,6 +336,7 @@ class lerc_session():
 
     def wait_for_command(self, command):
         """Wait for a command to complete by continously querying for its status to change to 'COMPLETE' with the server.
+        If the status changes to 'STARTED' and self.pipe is True, stream back results to the screen as they become available.
 
         :param str command: A dictionary representation of a lerc command.
         :return: Any results returned by a Run command or a file that was collected off of a client 
@@ -338,6 +361,10 @@ class lerc_session():
                 command = self.stream_file(command['analyst_file_path'], command['file_position'])
                 if 'warn' in command:
                     self.logger.warn(command['warn'])
+            elif status == 'STARTED':
+                self.logger.info("Command {} STARTED. Checking again in 10 seconds..".format(self.cid))
+                time.sleep(10)
+                command = self.check_command()
             else:
                 self.logger.info("Command {} state: {}.".format(self.cid, command['status']))
                 return command
