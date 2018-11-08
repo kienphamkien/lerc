@@ -83,15 +83,15 @@ Server Installation
 
      1. If you have more that one environment/comany, then duplicate the following line however many times you need to::
 
-        INSERT INTO company_mapping SET name='<your organization/company/group name>';
+            INSERT INTO company_mapping SET name='<your organization/company/group name>';
 
      2. Change the "`password`" in the following command to something unique::
 
-        GRANT ALL PRIVILEGES ON lerc . * TO 'lerc_user'@'localhost' IDENTIFIED BY 'password';
+            GRANT ALL PRIVILEGES ON lerc . * TO 'lerc_user'@'localhost' IDENTIFIED BY 'password';
 
    Next, import the ``schema.sql`` file to configure mysql for lerc::
 
-     sudo mysql < /opt/lerc/lerc_server/etc/schema.sql
+         sudo mysql < /opt/lerc/lerc_server/etc/schema.sql
 
 #. Create this file ``/opt/lerc/lerc_server/etc/lerc_server.ini`` with the following defaults and supply the password you created above to the ``dbuserpass`` variable::
 
@@ -108,19 +108,19 @@ Server Installation
 
 #. Give lerc full permissions over ``/opt/lerc/``::
 
-  sudo chown -R lerc:lerc lerc
+    sudo chown -R lerc:lerc lerc
 
 #. Create a symlink from your configuration file to ``/etc/apache2/sites-available``. Example::
 
-  cd /etc/apache2/sites-available && sudo ln -s /opt/lerc/lerc_server/etc/lerc_server.conf
+    cd /etc/apache2/sites-available && sudo ln -s /opt/lerc/lerc_server/etc/lerc_server.conf
 
 #. Enable the apache ssl module and the lerc server site you symlinked to::
 
-  sudo a2enmod ssl && sudo a2ensite lerc_server.conf
+    sudo a2enmod ssl && sudo a2ensite lerc_server.conf
 
 #. Reload Apache2::
 
-  sudo service apache2 reload
+    sudo service apache2 reload
 
 Log Rotation
 ------------
