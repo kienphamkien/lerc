@@ -97,7 +97,7 @@ if __name__ == "__main__":
         if host['hostname'] == 'WIN-1TMIV79KTI8' or host['hostname'] == 'icinga' \
                                                  or host['hostname'] == 'W7GOTCHAPC':
             continue
-        if host['status'] != 'UNINSTALLED' and host['hostname'] == 'PCN0351378':
+        if host['status'] != 'UNINSTALLED':
             logger.info("Issuing upgrade commands to {}".format(host['hostname']))
             ls.attach_host(host['hostname'])
 
