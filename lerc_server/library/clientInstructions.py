@@ -3,9 +3,9 @@ def Sleep(seconds):
     # return dict
     return { "operation":"sleep", "seconds":seconds }
 
-def Run(command_id, command):
+def Run(command_id, command, async=False):
     # execute a shell command on the host
-    return { "operation":"run", "id":command_id, "command":command }
+    return { "operation":"run", "id":command_id, "command":command , "async":async}
 
 def Download(command_id, path):
     # Send file to endpoint - resume capable
