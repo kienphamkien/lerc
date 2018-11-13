@@ -339,8 +339,8 @@ class lerc_session():
                     yield data
                     data = f.read(4096)
                 #break
-        self.command = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen())
-        return self.command.json()
+        self.command = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen()).json()
+        return self.command
 
     def wait_for_command(self, command):
         """Wait for a command to complete by continously querying for its status to change to 'COMPLETE' with the server.
