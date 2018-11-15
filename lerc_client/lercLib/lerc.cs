@@ -346,7 +346,7 @@ namespace lercLib
         public static void UploadFile(string id, string path, long position)
         {
             // open the target file
-            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read))
+            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             {
                 // seek to the desired starting position
                 fs.Seek(position, SeekOrigin.Begin);
