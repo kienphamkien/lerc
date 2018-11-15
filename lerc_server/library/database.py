@@ -80,14 +80,16 @@ class Clients(db.Model):
     company_id = db.Column(db.Integer)
     last_activity = db.Column(db.DateTime)
     sleep_cycle = db.Column(db.Integer)
+    version = db.Column(db.String(20))
 
-    def __init__(self, hostname, status=clientStatusTypes.ONLINE, install_date=datetime.now(), company_id=0, sleep_cycle=60):
+    def __init__(self, hostname, status=clientStatusTypes.ONLINE, install_date=datetime.now(), company_id=0, sleep_cycle=60, version=None):
         self.hostname = hostname
         self.status = status
         self.install_date = install_date
         self.company_id = company_id
         self.last_activity = datetime.now()
         self.sleep_cycle = sleep_cycle
+        self.version = version
 
     def to_dict(self):
         return {'hostname': self.hostname,
@@ -96,6 +98,7 @@ class Clients(db.Model):
                 'company_id': self.company_id,
                 'last_activity': self.last_activity.strftime('%Y-%m-%d %H:%M:%S'),
                 'sleep_cycle': self.sleep_cycle,
-                'id': self.id}
+                'id': self.id,
+                'version': self.version}
 # End DB models #
 

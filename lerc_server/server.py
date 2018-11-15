@@ -5,6 +5,7 @@ import sys
 import json
 import logging
 import configparser
+from hashlib import md5
 from datetime import datetime
 from flask_restful import Resource, Api
 from flask import Flask, request, jsonify, stream_with_context, Response, make_response
@@ -97,11 +98,11 @@ class CustomRequestHandler(WSGIRequestHandler):
     def connection_dropped(self, error, environ=None):
         logging.warning('Connection dropped when streaming response data to client.')
 
-def host_check(host, company):
+def host_check(host, company, version=None):
     # known host?
     client = Clients.query.filter_by(hostname=host).first()
     if client is None:
-        new_client = Clients(host, company_id=company, sleep_cycle=15)
+        new_client = Clients(host, company_id=company, sleep_cycle=15, version=version)
         db.session.add(new_client)
         db.session.commit()
         logger.info("Added {}/{} to client table".format(host, company))
@@ -130,6 +131,7 @@ def host_check(host, company):
     else:
         client.status = clientStatusTypes.ONLINE
         client.last_activity = datetime.now()
+        client.version = version
         db.session.commit()
         return client
 
@@ -162,7 +164,9 @@ def command_manager(host, remove_cid=None):
                     if not specified by the analyst when the command was issued '''
                 command.client_file_path = DEFAULT_CLIENT_DIR + command.client_file_path
                 db.session.commit()
-                    
+        elif command.operation == operationTypes.RUN:
+            command.command = 'cd "'+DEFAULT_CLIENT_DIR+'" && '+command.command
+            db.session.commit()
         return command
     return None
 
@@ -205,9 +209,12 @@ class Fetch(Resource):
             logger.error("Malformed request")
             return None
 
+        version = None
+        if 'version' in request.args:
+            version = request.args['version']
         host = request.args['host']
         company = request.args['company']
-        client = host_check(host, int(company))
+        client = host_check(host, int(company), version=version)
         if not client:
             # if something is not right, always issue sleep
             return ci.Sleep(DEFAULT_SLEEP)
@@ -580,6 +587,7 @@ class AnalystUpload(Resource):
     def post(self):
         host = request.args['host']
         cid = request.args['cid']
+
         command = Commands.query.filter_by(hostname=host, command_id=cid).first()
         if not command:
             return {'status_code':'404',
@@ -587,18 +595,25 @@ class AnalystUpload(Resource):
                     'error': "Command id '{}' does not exist.".format(cid)}
         command.filesize = int(request.args['filesize'])
 
-        # see if a file by the same name and size already exists
+
+        # see if a file by the same name and md5 already exists 
         if os.path.exists(os.path.join(BASE_DIR,command.server_file_path)):
-            statinfo = os.stat(os.path.join(BASE_DIR,command.server_file_path))
-            if command.filesize == statinfo.st_size:
+            # get md5 of file
+            md5_hasher = md5()
+            with open(os.path.join(BASE_DIR,command.server_file_path), 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b''):
+                    md5_hasher.update(chunk)
+            file_md5 = md5_hasher.hexdigest().lower()
+
+            if request.args['md5'] == file_md5:
                 command.status = cmdStatusTypes.PENDING
                 db.session.commit()
                 logger.warn("File by same name and size already exists")
                 command_dict = command.to_dict()
-                command_dict['warn'] = "File by same name and size already exists on server at {}".format(command.server_file_path)
+                command_dict['warn'] = "File by same name and md5 already exists on server at {}".format(command.server_file_path)
                 return command_dict
             else:
-                logger.warn("over writing file by same name but with different size")
+                logger.warn("over writing file by same name but with different md5 hash")
                 os.remove(os.path.join(BASE_DIR,command.server_file_path))
 
         stream_error = receive_streamed_data(command)
