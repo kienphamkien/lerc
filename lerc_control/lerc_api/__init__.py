@@ -4,8 +4,10 @@ import sys
 import time
 import json
 import atexit
+import pprint
 import logging
 import requests
+from hashlib import md5
 from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
@@ -73,6 +75,10 @@ class lerc_session():
         if not config.has_section(profile):
             raise Exception("No section named '{}' in configuration file".format(profile))
 
+        # save config for future use
+        self.config = config
+        self.profile = profile
+
         if server:
             self.server = server
         else:
@@ -113,11 +119,11 @@ class lerc_session():
             self.error = { 'status_code': r.status_code, 'message': "ERROR : {}".format(r.text) }
             self.logger.error(self.error['message'])
             return False
-        else: # record the command id
+        else: # record the command
             result = r.json()
             if 'command_id' in result:
                 self.logger.info("{} (CID: {})".format(result['message'], result['command_id']))
-                self.cid = result['command_id']
+                self.command = result
                 return result
             else:
                 if 'error' not in result:
@@ -139,10 +145,16 @@ class lerc_session():
     def Download(self, server_file_path, client_file_path=None, analyst_file_path=None):
         """Instruct a client to download a file. The file will be streamed to the server if the server doesn't have it yet. The streamed to the client.
 
-        :param str server_file_path: The path to the file that you want the client to download.
-        :param str client_file_path: (optional) where the client should write the file, defaults to lerc.ini specification or server default if not defined in config.
+        :param str server_file_path: The path to the file that you want the client to download. If the supplied argument is the path to the file on the system this function is called, an attempt will be made to complete the analyst_file_path automatically.
+        :param str client_file_path: (optional) where the client should write the file, defaults server config default directory + the file name taken off of the server_file_path.
         :param str analyst_file_path: (optional) path to the original file the analyst - This allows an analyst to resume a transfer between a lerc_session and the server. Neccessary for streaming the file to the server, if the server does not already have it
         """
+        if analyst_file_path is None:
+            analyst_file_path = server_file_path
+
+        if '/' in server_file_path:
+            server_file_path = server_file_path[server_file_path.rfind('/')+1:]
+
         command = { "operation":"download", "server_file_path":server_file_path,
                     "client_file_path":client_file_path, "analyst_file_path":analyst_file_path}
 
@@ -166,22 +178,21 @@ class lerc_session():
         return self.check_command()
 
     def check_command(self, cid=None):
-        """Check on a specific command by id. If a command id is not specifed, whatever cid the lerc_session is currently attached to will be used.
+        """Check on a specific command by id. If None is give, the command_id in any command associated to this lerc_session will be used. Else, return False.
 
         :param int cid: (optional) The Id of a command you want to get the status of.
         :return: Dictionary representation of a command
         """
-        if self.cid is None:
-            if  cid is None:
-                self.error = "No command id to check"
-                self.logger.error(self.error)
+        if not cid:
+            if not self.command:
+                self.logger.error("No command has been attached to this session")
                 return False
-            else:
-                self.cid = cid
-        arguments = {'cid':self.cid}
+            cid = self.command['command_id']
+
+        arguments = {'cid':cid}
         if self.host:
             arguments['host'] = self.host
-        self.logger.debug("Trying to get command {}".format(self.cid))
+        self.logger.debug("Trying to get command {}".format(cid))
         r = requests.get(self.server+'/command', cert=self.cert, params=arguments).json()
         if 'error' in r:
             if 'message' in r: # server error
@@ -196,25 +207,23 @@ class lerc_session():
         self.command = r
         return self.command
 
-    def get_results(self, cid=None, file_path=None, chunk_size=None):
+    def get_results(self, cid=None, file_path=None, chunk_size=None, print_run=True):
         """Get any results available for a command. If cid is None, any cid currently assigned to the lerc_session will be used.
 
         :param int cid: (optional) The Id of a command to work with.
         :param str file_path: (optional) The path to write the results. default: <hostname>_<cid>_filename to current dir.
         :param int chunk_size: (optional) Specify the size of the chunks (bytes) to stream with the server
+        :param boolean print_run: (optionl default:True) If True, print Run command results to console
         :return: Any results returned by a Run command or a file collected from a client 
         """
-        if cid and self.cid:
-            if cid != self.cid:
-                self.logger.warn("Updating self with current status of the command id passed")
-                self.cid = cid
-                self.check_command(cid)
-        elif cid and not self.cid:
-            self.cid = cid
+        if not cid:
+            if not self.command:
+                self.logger.error("No command has been attached to this session")
+                return False
+            cid = self.command['command_id']
+
+        if not self.command:
             self.check_command(cid)
-        if not self.cid:
-            self.logger.error("No command has been attached to this session")
-            return False
 
         if self.command['operation'] == 'DOWNLOAD' or self.command['operation'] == 'QUIT':
             self.logger.info("No results to get for '{}' operations".format(self.command['operation']))
@@ -238,8 +247,8 @@ class lerc_session():
             self.logger.info("Already have {} out of {} bytes. Resuming download from server.."
                              .format(position, self.command['filesize']))
         else:
-            self.logger.debug("getting results for {}".format(self.cid))
-        arguments = {'position': position, 'cid': self.cid}
+            self.logger.debug("getting results for {}".format(cid))
+        arguments = {'position': position, 'cid': cid}
         headers = {"Accept-Encoding": '0'}
         total_chunks, remaining_bytes = divmod(self.command['filesize'] - position, self.chunk_size)
         with closing(requests.get(self.server+'/command/download', cert=self.cert, params=arguments, headers=headers, stream=True)) as r:
@@ -247,11 +256,11 @@ class lerc_session():
                 r.raw.decode_content = True
                 with open(file_path, 'ba') as f:
                     for i in range(total_chunks):
-                        if self.command['operation'] == 'RUN':
+                        if self.command['operation'] == 'RUN' and print_run:
                             print(r.raw.read(self.chunk_size).decode('utf-8'))
                         f.write(r.raw.read(self.chunk_size))
                     final_chunk = r.raw.read(remaining_bytes)
-                    if self.command['operation'] == 'RUN':
+                    if self.command['operation'] == 'RUN' and print_run:
                         print(final_chunk.decode('utf-8'))
                     f.write(final_chunk)
                     f.close()
@@ -313,16 +322,27 @@ class lerc_session():
             self.error = "No host has been specified host."
             self.logger.error(self.error)
             return False
-        if not self.cid:
-            self.error = "No command id."
+
+        if not self.command:
+            self.error = "No command associated with this session"
             self.logger.error(self.error)
             return False
+        cid = self.command['command_id']
+
         if not os.path.exists(file_path):
             self.error = "{} does not exists. Aborting.".format(file_path)
             self.logger.error(self.error)
             return False
-        statinfo = os.stat(file_path)
-        arguments = {'host': self.host, 'cid': self.cid, 'filesize': statinfo.st_size}
+
+        # get md5 of file
+        md5_hasher = md5()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b''):
+                md5_hasher.update(chunk)
+        file_md5 = md5_hasher.hexdigest().lower()
+
+        statinfo = os.stat(file_path)        
+        arguments = {'host': self.host, 'cid': cid, 'filesize': statinfo.st_size, 'md5': file_md5}
         def gen():
             with open(file_path, 'rb') as f:
                 f.seek(position)
@@ -331,8 +351,8 @@ class lerc_session():
                     yield data
                     data = f.read(4096)
                 #break
-        self.command = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen())
-        return self.command.json()
+        self.command = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen()).json()
+        return self.command
 
     def wait_for_command(self, command):
         """Wait for a command to complete by continously querying for its status to change to 'COMPLETE' with the server.
@@ -342,17 +362,18 @@ class lerc_session():
         :return: Any results returned by a Run command or a file that was collected off of a client 
         """
         while command:
+            cid = command['command_id']
             status = command['status']
             if status == 'PENDING': # we wait
-                self.logger.info("Command {} PENDING. Checking again in 10 seconds..".format(self.cid))
+                self.logger.info("Command {} PENDING. Checking again in 10 seconds..".format(cid))
                 time.sleep(10)
-                command = self.check_command()
+                command = self.check_command(cid=cid)
             elif status == 'PREPARING': # the command needs something from us (file)
                 if command['operation'] != "DOWNLOAD":
-                    self.error = "Command {} is PREPARING but we don't know what for.".format(self.cid)
+                    self.error = "Command {} is PREPARING but we don't know what for.".format(cid)
                     self.logger.error(self.error)
                     return False
-                self.logger.info("Command {} PREPARING. Streaming file to server..".format(self.cid))
+                self.logger.info("Command {} PREPARING. Streaming file to server..".format(cid))
                 # function to stream file to server
                 if not command['analyst_file_path']:
                     self.error = "Can't resume upload to server, analyst_file_path is not defined"
@@ -362,27 +383,19 @@ class lerc_session():
                 if 'warn' in command:
                     self.logger.warn(command['warn'])
             elif status == 'STARTED':
-                self.logger.info("Command {} STARTED. Checking again in 10 seconds..".format(self.cid))
+                self.logger.info("Command {} STARTED. Checking again in 10 seconds..".format(cid))
                 time.sleep(10)
-                command = self.check_command()
+                command = self.check_command(cid=cid)
             else:
-                self.logger.info("Command {} state: {}.".format(self.cid, command['status']))
+                self.logger.info("Command {} state: {}.".format(cid, command['status']))
                 return command
 
     def contain(self):
         """Use the windows firewall to isolate a host. Everything will be blocked but lerc's access outbound. You must attach to a host before using contain.
+        This is implemented by dropping a bat file (a default is included in the lerc_control/tools dir) that will isolate a host with the windows firewall and only allow the lerc.exe client access through the firewall. The bat file will pause for ~60 seconds without prompting the user. Lerc is issued a run command to kill the bat file. If Lerc is able to fetch this run command from the control server, the bat file will be killed before the 60 seconds are up. If not, the bat file will undo all firewall changes.
 
         :return: True on success
         """
-        '''
-        netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound
-        netsh advfirewall firewall add rule name="LERC" dir=out action=allow program="C:\Program Files (x86)\Integral Defense\Live Endpoint Response Client\lerc.exe" enable=yes
-        netsh advfirewall set allprofiles state on
-        netsh advfirewall show allprofiles
-        '''
-
-        # TODO: Drop a bat file to undo these changes and call it at the very end of the commands below -
-        # at the beggining of the bat file, pause for 60 seconds. See next TODO comment->
 
         if self.contained:
             return self.contained
@@ -390,22 +403,33 @@ class lerc_session():
         self.logger.info("containing host..")
         status = self.check_host()
         status = status['client']
-        self.logger.warn(status['sleep_cycle'])
-        # TODO: drop the bat file that will pause for 60 seconds and then undo all firewall changes we make
-        self.Run('netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound && \
-                netsh advfirewall firewall add rule name="LERC" dir=out action=allow program="C:\\Program Files (x86)\\Integral Defense\\Live Endpoint Response Client\\lerc.exe" enable=yes && \
-                netsh advfirewall set allprofiles state on && TIMEOUT /T {} /NOBREAK && \
-                netsh advfirewall reset && netsh advfirewall show allprofiles'.format(status['sleep_cycle']))
-        # TODO: self.Run("kill the bat file that should still be paused on the client (and then delete it?)")
-        # After the firewall changes are made, the host should check back in and get the command to kill the bat file
-        # If the host can not check back in, then, the bat file will un-do the firewall changes
-        # This should keep us from locking ourselves out of a client
-        self.wait_for_command(self.check_command())
+        safe_contain_bat_path = self.config[self.profile]['containment_bat']
+        contain_cmd = self.config[self.profile]['contain_cmd']
+
+        self.Download(safe_contain_bat_path)
+        containment_command = self.Run(contain_cmd.format(int(status['sleep_cycle'])+5), async=True)
+
+        # Dummy command to give the containment command enough time to execute before lerc kills it with wmic
+        self.Run("dir")
+ 
+        bat_name = safe_contain_bat_path[safe_contain_bat_path.rfind('/')+1:]
+        kill_command = self.Run('wmic process where "CommandLine Like \'%{}%\'" Call Terminate'.format(bat_name))
+
+        # for spot checking
+        check_command = self.Run('netsh advfirewall show allprofiles')
+
+        containment_command = self.wait_for_command(containment_command)
+        self.logger.info(pprint.pformat(containment_command))
         self.logger.info("Host contained at: {}".format(datetime.now()))
+        
+        self.logger.info("Command {} should return before {} seconds have passed.".format(kill_command['command_id'], status['sleep_cycle']))
+        kill_command = self.wait_for_command(kill_command)
+        self.logger.info(pprint.pformat(kill_command))
+
         self.logger.info("Getting firewall status for due diligence..")
-        self.Run('netsh advfirewall show allprofiles')
-        self.wait_for_command(self.check_command())
-        self.get_results(file_path = "{}_firewall_containment.txt".format(self.host))
+        check_command = self.wait_for_command(check_command)
+        self.get_results(file_path = "{}_{}_firewall_status.txt".format(self.host, check_command['command_id']), print_run=False)
+
         self.contained = True
         return self.contained
 
@@ -418,6 +442,7 @@ class lerc_session():
         self.wait_for_command(self.check_command())
         self.logger.info("Host containment removed at: {}".format(datetime.now()))
         self.logger.info("Getting firewall status for due diligence..")
-        self.get_results(file_path = "{}_firewall_reset.txt".format(self.host))
+        cid = self.command['command_id']
+        self.get_results(file_path = "{}_{}_firewall_reset.txt".format(self.host, cid), print_run=False)
         self.contained = False
         return not self.contained
