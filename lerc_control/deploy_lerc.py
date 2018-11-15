@@ -215,6 +215,7 @@ def main(argv):
 
    # Get the right sensor 
     sensor = None
+    hostname = args.hostname
     try:
         logging.debug("Getting the sensor object from carbonblack")
         sensor = cb.select(Sensor).where("hostname:{}".format(hostname)).one()

@@ -7,6 +7,7 @@ import atexit
 import pprint
 import logging
 import requests
+from hashlib import md5
 from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
@@ -221,6 +222,9 @@ class lerc_session():
                 return False
             cid = self.command['command_id']
 
+        if not self.command:
+            self.check_command(cid)
+
         if self.command['operation'] == 'DOWNLOAD' or self.command['operation'] == 'QUIT':
             self.logger.info("No results to get for '{}' operations".format(self.command['operation']))
             return self.command
@@ -329,8 +333,16 @@ class lerc_session():
             self.error = "{} does not exists. Aborting.".format(file_path)
             self.logger.error(self.error)
             return False
-        statinfo = os.stat(file_path)
-        arguments = {'host': self.host, 'cid': cid, 'filesize': statinfo.st_size}
+
+        # get md5 of file
+        md5_hasher = md5()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b''):
+                md5_hasher.update(chunk)
+        file_md5 = md5_hasher.hexdigest().lower()
+
+        statinfo = os.stat(file_path)        
+        arguments = {'host': self.host, 'cid': cid, 'filesize': statinfo.st_size, 'md5': file_md5}
         def gen():
             with open(file_path, 'rb') as f:
                 f.seek(position)
