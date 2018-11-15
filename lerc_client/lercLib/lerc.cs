@@ -23,6 +23,7 @@ namespace lercLib
         public volatile static bool quit;
         static StringDictionary config;
         static string defaultServerUrl;
+        static string version;
         #endregion
 
         // initialize lerc
@@ -32,6 +33,8 @@ namespace lercLib
             host = Uri.EscapeUriString(Environment.MachineName);
 
             defaultServerUrl = ConfigurationManager.AppSettings["defaultServerUrl"];
+
+            version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
 
             // load config
             LoadConfig();
@@ -178,7 +181,7 @@ namespace lercLib
                 try
                 {
                     lastServerUsed = serverUrls[i];
-                    string url = lastServerUsed + "fetch?host=" + host + "&company=" + ConfigGetString("company", "0");
+                    string url = lastServerUsed + "fetch?host=" + host + "&company=" + ConfigGetString("company", "0") + "&version=" + version;
                     Log.Trace("GET " + url);
                     HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
                     request.ClientCertificates.Add(clientCertificate);
@@ -224,7 +227,7 @@ namespace lercLib
         {
             try
             {
-                string uri = lastServerUsed + "error?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id;
+                string uri = lastServerUsed + "error?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id + "&version=" + version;
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
                 request.ClientCertificates.Add(clientCertificate);
                 request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
@@ -295,7 +298,7 @@ namespace lercLib
                             lastSendTime = Environment.TickCount;
 
                             string company = ConfigGetString("company", "0");
-                            uri = lastServerUsed + "pipe?host=" + host + "&company=" + company + "&id=" + id + "&size=" + buffer.Length + "&done=false";
+                            uri = lastServerUsed + "pipe?host=" + host + "&company=" + company + "&id=" + id + "&size=" + buffer.Length + "&done=false&version=" + version;
                             request = (HttpWebRequest)WebRequest.Create(uri);
                             request.ClientCertificates.Add(clientCertificate);
                             request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
@@ -325,7 +328,7 @@ namespace lercLib
             }
 
             // inform that the command is done
-            uri = lastServerUsed + "pipe?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id + "&size=0&done=true";
+            uri = lastServerUsed + "pipe?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id + "&size=0&done=true&version=" + version;
             request = (HttpWebRequest)WebRequest.Create(uri);
             request.ClientCertificates.Add(clientCertificate);
             request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
@@ -351,7 +354,7 @@ namespace lercLib
                 // seek to the desired starting position
                 fs.Seek(position, SeekOrigin.Begin);
 
-                string uri = lastServerUsed + "upload?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id + "&size=" + fs.Length;
+                string uri = lastServerUsed + "upload?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id + "&size=" + fs.Length + "&version=" + version;
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
                 request.ClientCertificates.Add(clientCertificate);
                 request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
@@ -388,7 +391,7 @@ namespace lercLib
                 long position = fs.Position;
 
                 // send the current position to the server as a query string variable
-                string uri = lastServerUsed + "download?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id + "&position=" + position;
+                string uri = lastServerUsed + "download?host=" + host + "&company=" + ConfigGetString("company", "0") + "&id=" + id + "&position=" + position + "&version=" + version;
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
                 request.ClientCertificates.Add(clientCertificate);
                 request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
