@@ -258,7 +258,9 @@ class Pipe(Resource):
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
         logger.info("Receiving Run command result from {}: ".format(host))
         command.server_file_path = "{}{}_RUN_{}".format(DATA_DIR, host, cid)
-        post_size = int(request.args['size'])
+        post_size = UGLY_CHUNKSIZE
+        if 'size' in request.args:
+            post_size = int(request.args['size'])
         command.filesize = command.filesize + post_size
         command.status = cmdStatusTypes.STARTED
         db.session.commit()
@@ -306,7 +308,7 @@ class Upload(Resource):
 
         # get status of this command
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
-        if not command.filesize and 'size' in request.args:
+        if 'size' in request.args and request.args['size'] != command.filesize:
             command.filesize = request.args['size']
             db.session.commit()
         if command.file_position > 0:
@@ -655,7 +657,7 @@ class AnalystDownload(Resource):
             except Exception as e:
                 logging.error(str(e))
 
-        if 'cid' not in request.args:
+        if 'cid' not in request.args or 'position' not in request.args:
             logger.warn("Malformed analyst download request")
             return {'status_code': '400',
                     'message': 'Bad Request',
@@ -666,6 +668,11 @@ class AnalystDownload(Resource):
             return {'status_code':'404',
                     'message': "Not Found",
                     'error': "Command id '{}' does not exist.".format(cid)}
+
+        command.file_position = int(request.args['position'])
+        if command.status == cmdStatusTypes.STARTED and command.operation == operationTypes.RUN:
+            return Response(stream_with_context(stream_results(command)))
+
         if command.status != cmdStatusTypes.COMPLETE:
             result = command.to_dict()
             result['warn'] = "Command is not COMPLETE."
