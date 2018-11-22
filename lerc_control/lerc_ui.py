@@ -7,10 +7,9 @@ import argparse
 import logging
 import coloredlogs
 import pprint
-
 import lerc_api
 
-from configparser import ConfigParser
+import collect
 
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
@@ -21,32 +20,7 @@ logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 logging.getLogger('lerc_api').setLevel(logging.INFO)
 
 logger = logging.getLogger('lerc_ui')
-coloredlogs.install(level='DEBUG', logger=logger)
-
-
-def load_config(profile='default'):
-    config = ConfigParser()
-    config_paths = []
-    config_paths.append(os.path.join(os.getcwd(),'etc','lerc.ini'))
-    config_paths.append('/opt/lerc_control/etc/lerc.ini')
-    config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
-    for cp in config_paths:
-        try:
-            if os.path.exists(cp):
-                config.read(cp)
-                logger.debug("Reading config file at {}.".format(cp))
-                break
-        except:
-            pass
-    else:
-        logger.critical("No configuration file defined along search paths: {}".format(config_paths))
-
-    try:
-        config[profile]
-    except:
-        logger.critical("No section named '{}' in configuration file".format(profile))
-        sys.exit(1)
-    return config
+coloredlogs.install(level='INFO', logger=logger)
 
 
 if __name__ == "__main__":
@@ -62,6 +36,8 @@ if __name__ == "__main__":
     parser_run = subparsers.add_parser('run', help="Run a shell command on the host. BE CAREFUL!")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
     parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
+
+    parser_collect = subparsers.add_parser('collect', help="perform a full lr.exe collection on the host")
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
     parser_upload.add_argument('file_path', help='the file path on the client')
@@ -92,12 +68,13 @@ if __name__ == "__main__":
         coloredlogs.install(level='DEBUG', logger=logger)
 
     profile=args.environment if args.environment else 'default'
-    config = load_config(profile)
-    if 'ignore_system_proxy' in config[profile]:
-        if config[profile].getboolean('ignore_system_proxy'):
-            # route direct
-            if 'https_proxy' in os.environ:
-                del os.environ['https_proxy']
+
+    if args.instruction == 'collect':
+        if not args.debug:
+            logging.getLogger('lerc_api').setLevel(logging.WARNING)
+        collect.full_collection(args.hostname, profile=profile)
+        #pprint.pprint(commands)
+        sys.exit(0)
 
     host = args.hostname
 
@@ -158,9 +135,8 @@ if __name__ == "__main__":
         print()
         sys.exit()
     else:
-        result = ls.check_host()
-        if 'client' in result:
-            pprint.pprint(result['client'])
+        client = ls.check_host()
+        pprint.pprint(client)
         print()
         sys.exit()
 

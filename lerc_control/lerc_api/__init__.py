@@ -12,6 +12,55 @@ from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
 
+# Get the working lerc_control directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def load_config(profile='default', required_keys=[]):
+    """Load lerc configuration. Configuration files are looked for in the following locations::
+        /etc/lerc_control/lerc.ini
+        /opt/lerc/lerc_control/etc/lerc.ini
+        ~/<current-user>/lerc_control/lerc.ini
+        /<python-lib-where-lerc_control-installed>/etc/lerc.ini
+
+    Configuration items found in later config files take presendence over earlier ones.
+
+    :param str profile: (optional) Specifiy a group or company to work with.
+    """
+    logger = logging.getLogger(__name__+".load_config")
+    config = ConfigParser()
+    config_paths = []
+    # global
+    config_paths.append('/etc/lerc_control/lerc.ini')
+    # legacy
+    config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
+    # user specific
+    config_paths.append(os.path.join(os.path.expanduser("~"),'.lerc_control','lerc.ini'))
+    # local & defaults
+    config_paths.append(os.path.join(BASE_DIR, 'etc', 'lerc.ini'))
+    finds = []
+    for cp in config_paths:
+        if os.path.exists(cp):
+            logger.debug("Found config file at {}.".format(cp))
+            finds.append(cp)
+    if not finds:
+        logger.critical("Didn't find any config files defined at these paths: {}".format(config_paths))
+        raise Exception("MissingLercConfig", "Config paths : {}".format(config_paths))
+
+    config.read(finds)
+    try:
+        config[profile]
+    except KeyError:
+        logger.critical("No section named '{}' in configuration files : {}".format(profile, config_paths))
+        raise
+
+    if isinstance(required_keys, list) and required_keys:
+        for key in required_keys:
+            if not config.has_option(profile, key):
+                logger.error("Missing required config item: {}".format(key))
+
+    return config
+
 
 class lerc_session():
     """Represents a Live Endpoint Response Client and Server control session.
@@ -29,8 +78,7 @@ class lerc_session():
     host = None
     server = None
     command = None
-    cid = None
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__+".lerc_session")
 
     def _detach_host(self): #, server, host):
         # tell the server we're done with the host
@@ -57,59 +105,46 @@ class lerc_session():
         self.logger.debug("attaching to host '{}'..".format(host))
 
     def __init__(self, profile='default', server=None, host=None, cid=None, chunk_size=4096):
-        config = ConfigParser()
-        config_paths = []
-        config_paths.append(os.path.join(os.getcwd(),'etc','lerc.ini'))
-        config_paths.append('/opt/lerc_control/etc/lerc.ini')
-        config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
-        for cp in config_paths:
-            try:
-                if os.path.exists(cp):
-                    config.read(cp)
-                    self.logger.debug("Reading config file at {}.".format(cp))
-                    break
-            except:
-                pass
-        else:
-            raise Exception("No configuration file defined along search paths: {}".format(config_paths))
-        if not config.has_section(profile):
-            raise Exception("No section named '{}' in configuration file".format(profile))
-
-        # save config for future use
-        self.config = config
+        self.config = load_config(profile)
         self.profile = profile
-
         if server:
             self.server = server
         else:
-            self.server = config[profile]['server']
+            self.server = self.config[profile]['server']
         if not self.server.startswith('https://'):
             self.server = 'https://' + self.server
         if self.server[-1] == '/':
             self.server = self.server[:-1]
-        if 'ignore_system_proxy' in config[profile]:
-            if config[profile].getboolean('ignore_system_proxy'):
+        if 'server_ca_cert' in self.config[profile]:
+            self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
+            os.environ['REQUESTS_CA_BUNDLE'] = self.config[profile]['server_ca_cert']
+        self.client_cert = self.config[profile]['client_cert']
+        self.client_key = self.config[profile]['client_key']
+        self.cert = (self.client_cert, self.client_key)
+        if 'ignore_system_proxy' in self.config[profile]:
+            if self.config[profile].getboolean('ignore_system_proxy'):
+                # route direct
                 if 'https_proxy' in os.environ:
                     del os.environ['https_proxy']
-        if 'server_ca_cert' in config[profile]:
-            self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
-            os.environ['REQUESTS_CA_BUNDLE'] = config[profile]['server_ca_cert']
-        self.client_cert = config[profile]['client_cert']
-        self.client_key = config[profile]['client_key']
-        self.cert = (self.client_cert, self.client_key)
         self.attach_host(host)
         self.command = None
-        self.cid = cid
         self.error = None
         self.contained = False
         self.chunk_size = chunk_size
         atexit.register(self._detach_host)
 
+    @property
+    def get_config(self):
+        return self.config
+
+    @property
+    def get_profile(self):
+        return self.profile
+
     def _issue_command(self, command):
         # check the host, make the post
         if not self.host:
-            self.error = "No host has been specified."
-            self.logger.error(self.error)
+            self.logger.error("No host has been specified.")
             return False
         arguments = {'host': self.host}
         headers={"content-type": "application/json"}
@@ -177,6 +212,14 @@ class lerc_session():
         self._issue_command(command)
         return self.check_command()
 
+    def list_directory(self, dir_path):
+        """List the given directory, read the results into a list and return the list.
+        """
+        command = self.Run('cd "{}" && dir'.format(dir_path))
+        command = self.wait_for_command(command)
+        results = self.get_results(command['command_id'], return_content=True)
+        return results.decode('utf-8').splitlines()
+
     def check_command(self, cid=None):
         """Check on a specific command by id. If None is give, the command_id in any command associated to this lerc_session will be used. Else, return False.
 
@@ -207,14 +250,16 @@ class lerc_session():
         self.command = r
         return self.command
 
-    def get_results(self, cid=None, file_path=None, chunk_size=None, print_run=True):
+    def get_results(self, cid=None, file_path=None, chunk_size=None, print_run=True, return_content=False, position=0):
         """Get any results available for a command. If cid is None, any cid currently assigned to the lerc_session will be used.
 
         :param int cid: (optional) The Id of a command to work with.
         :param str file_path: (optional) The path to write the results. default: <hostname>_<cid>_filename to current dir.
         :param int chunk_size: (optional) Specify the size of the chunks (bytes) to stream with the server
         :param boolean print_run: (optionl default:True) If True, print Run command results to console
-        :return: Any results returned by a Run command or a file collected from a client 
+        :param boolean return_content: (content) Do not write the results to a file, return the results as a byte string
+        :param int position: (optional) For manually specifing byte position
+        :return: If return_content==True, the raw content will be returned as a byte string, else the command is return on success. 
         """
         if not cid:
             if not self.command:
@@ -222,8 +267,8 @@ class lerc_session():
                 return False
             cid = self.command['command_id']
 
-        if not self.command:
-            self.check_command(cid)
+        # make sure the command is up-to-date
+        self.check_command(cid)
 
         if self.command['operation'] == 'DOWNLOAD' or self.command['operation'] == 'QUIT':
             self.logger.info("No results to get for '{}' operations".format(self.command['operation']))
@@ -240,7 +285,6 @@ class lerc_session():
         file_path = file_path[file_path.rfind('/')+1:] if file_path.startswith('data/') else file_path
 
         # Do we already have some of the result file?
-        position = 0
         if os.path.exists(file_path):
             statinfo = os.stat(file_path)
             position = statinfo.st_size
@@ -248,25 +292,35 @@ class lerc_session():
                              .format(position, self.command['filesize']))
         else:
             self.logger.debug("getting results for {}".format(cid))
+        raw_bytes = None
         arguments = {'position': position, 'cid': cid}
         headers = {"Accept-Encoding": '0'}
         total_chunks, remaining_bytes = divmod(self.command['filesize'] - position, self.chunk_size)
         with closing(requests.get(self.server+'/command/download', cert=self.cert, params=arguments, headers=headers, stream=True)) as r:
             try:
                 r.raw.decode_content = True
-                with open(file_path, 'ba') as f:
+                # are we returning the raw bytes?
+                if return_content:
+                    raw_bytes = b''
                     for i in range(total_chunks):
+                        raw_bytes += r.raw.read(self.chunk_size)
+                    raw_bytes += r.raw.read(remaining_bytes)
+                    return raw_bytes
+                else:
+                    with open(file_path, 'ba') as f:
+                        for i in range(total_chunks):
+                            if self.command['operation'] == 'RUN' and print_run:
+                                print(r.raw.read(self.chunk_size).decode('utf-8'))
+                            f.write(r.raw.read(self.chunk_size))
+                        final_chunk = r.raw.read(remaining_bytes)
                         if self.command['operation'] == 'RUN' and print_run:
-                            print(r.raw.read(self.chunk_size).decode('utf-8'))
-                        f.write(r.raw.read(self.chunk_size))
-                    final_chunk = r.raw.read(remaining_bytes)
-                    if self.command['operation'] == 'RUN' and print_run:
-                        print(final_chunk.decode('utf-8'))
-                    f.write(final_chunk)
-                    f.close()
+                            print(final_chunk.decode('utf-8'))
+                        f.write(final_chunk)
+                        f.close()
             except Exception as e:
                 self.logger.error(str(e))
                 return False
+
         # Did we get the entire result file?
         filesize = os.stat(file_path).st_size
         if self.command['filesize'] == filesize:
@@ -288,8 +342,15 @@ class lerc_session():
         """
         if host:
             self.attach_host(host)
+        if not self.host:
+            self.logger.error("No host specified.")
+            return False
         r = requests.get(self.server+'/command', params={'host': self.host}, cert=self.cert).json()
-        return r
+        if 'client' in r:
+            return r['client']
+        else:
+            self.logger.error("{}".format(r))
+            return r
 
     def get_hosts(self):
         """Yeild dictionary representations of lerc clients.
@@ -298,9 +359,14 @@ class lerc_session():
         r = requests.get(self.server+'/command', params={'hid': host_id}, cert=self.cert).json()
         # there is no host by id 0, but when you query the server for a hid that doesn't exsit,
         # the response will be an error, that also contains a list of the valid host ids
+        if 'host_ids' not in r:
+            self.logger.error('Unexpected answer from server: result="{}"'.format(r))
+            raise Exception('Unexpected answer from server', 'result="{}"'.format(r))
         hids = r['host_ids']
         for host_id in hids:
             r = requests.get(self.server+'/command', params={'hid': host_id}, cert=self.cert).json()
+            if 'error' in r:
+                self.logger.error("{}".format(r['error']))
             yield r
 
     def get_command_queue(self, host=None):
@@ -309,11 +375,17 @@ class lerc_session():
         :param str host: (optional) The hostname of a lerc client.
         :return: A list of commands for a client, each list entry is a dictionary representation of a command
         """
-        r = self.check_host(host)
+        if host:
+            self.attach_host(host)
+        if not self.host:
+            self.logger.error("No host specified.")
+            return False
+        r = requests.get(self.server+'/command', params={'host': self.host}, cert=self.cert).json()
         if 'commands' in r:
             return r['commands']
-        # returning a list of commands
-        return r
+        else:
+            self.logger.error("{}".format(r))
+            return r
 
     def stream_file(self, file_path, position=0):
         # file_path - file to send
@@ -351,12 +423,15 @@ class lerc_session():
                     yield data
                     data = f.read(4096)
                 #break
-        self.command = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen()).json()
+        r = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen()).json()
+        if 'error' in r:
+            self.logger.error("{}".format(r['error']))
+            return r
+        self.command = r
         return self.command
 
     def wait_for_command(self, command):
         """Wait for a command to complete by continously querying for its status to change to 'COMPLETE' with the server.
-        If the status changes to 'STARTED' and self.pipe is True, stream back results to the screen as they become available.
 
         :param str command: A dictionary representation of a lerc command.
         :return: Any results returned by a Run command or a file that was collected off of a client 
