@@ -5,6 +5,7 @@ import sys
 import json
 import logging
 import configparser
+from hashlib import md5
 from datetime import datetime
 from flask_restful import Resource, Api
 from flask import Flask, request, jsonify, stream_with_context, Response, make_response
@@ -97,14 +98,15 @@ class CustomRequestHandler(WSGIRequestHandler):
     def connection_dropped(self, error, environ=None):
         logging.warning('Connection dropped when streaming response data to client.')
 
-def host_check(host, company):
+def host_check(host, company, version=None):
     # known host?
     client = Clients.query.filter_by(hostname=host).first()
     if client is None:
-        new_client = Clients(host, company_id=company, sleep_cycle=15)
+        new_client = Clients(host, company_id=company, sleep_cycle=15, version=version)
         db.session.add(new_client)
         db.session.commit()
         logger.info("Added {}/{} to client table".format(host, company))
+        return new_client
     elif client.status == clientStatusTypes.UNINSTALLED:
         logger.info("Client being re-installed.")
         client.status = clientStatusTypes.ONLINE
@@ -113,6 +115,7 @@ def host_check(host, company):
         client.company_id=company
         client.sleep_cycle=15
         db.session.commit()
+        return client
     elif client.company_id != company:
         if client.company_id is None:
             logger.info("setting company_id for {}".format(host))
@@ -120,16 +123,17 @@ def host_check(host, company):
             client.status = clientStatusTypes.ONLINE
             client.last_activity = datetime.now()
             db.session.commit()
-            return True
-        logger.error("Company id mismatch for {}.".format(host))
+            return client
+        logger.error("Company id mismatch for {}. Two clients with the same hostname in different environments?".format(host))
         client.status = clientStatusTypes.UNKNOWN
         db.session.commit()
         return False
     else:
         client.status = clientStatusTypes.ONLINE
         client.last_activity = datetime.now()
+        client.version = version
         db.session.commit()
-    return True
+        return client
 
 def command_manager(host, remove_cid=None):
     if remove_cid:
@@ -155,12 +159,14 @@ def command_manager(host, remove_cid=None):
                     logger.warning("Updating database: More bytes found on server than recorded in database. Prior exception went unhandled or unnoticed. Probable connection drop and resume before server reached timeout")
                     db.session.commit()
         elif command.operation == operationTypes.DOWNLOAD:
-            if '/' not in command.client_file_path:
+            if '\\' not in command.client_file_path:
                 ''' lerc.exe's writed files to c:\windows\system32 by defaut, so, change to DEFAULT_CLIENT_DIR
                     if not specified by the analyst when the command was issued '''
                 command.client_file_path = DEFAULT_CLIENT_DIR + command.client_file_path
                 db.session.commit()
-                    
+        elif command.operation == operationTypes.RUN:
+            command.command = 'cd "'+DEFAULT_CLIENT_DIR+'" && '+command.command
+            db.session.commit()
         return command
     return None
 
@@ -203,9 +209,13 @@ class Fetch(Resource):
             logger.error("Malformed request")
             return None
 
+        version = None
+        if 'version' in request.args:
+            version = request.args['version']
         host = request.args['host']
         company = request.args['company']
-        if not host_check(host, int(company)):
+        client = host_check(host, int(company), version=version)
+        if not client:
             # if something is not right, always issue sleep
             return ci.Sleep(DEFAULT_SLEEP)
         command = command_manager(host)
@@ -225,8 +235,10 @@ class Fetch(Resource):
                 db.session.commit()
                 return ci.Quit()
 
-        # default: tell client to do nothing
+        # default: tell client to do nothing - make sure sleep_cycle is default
         logger.info("Issuing Sleep({}) to {}".format(DEFAULT_SLEEP, host))
+        client.sleep_cycle = DEFAULT_SLEEP
+        db.session.commit()
         return ci.Sleep(DEFAULT_SLEEP)
 
 
@@ -294,7 +306,7 @@ class Upload(Resource):
 
         # get status of this command
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
-        if command.filesize is None and 'size' in request.args:
+        if not command.filesize and 'size' in request.args:
             command.filesize = request.args['size']
             db.session.commit()
         if command.file_position > 0:
@@ -481,6 +493,8 @@ class Command(Resource):
             logger.info("UPLOAD command id {} created for {}".format(new_command.command_id, host))
             return custom_response(200, 'created upload command', command_id=new_command.command_id)
         elif command['operation'].upper() == operationTypes.DOWNLOAD.name:
+            if command['client_file_path'] is None:
+                command['client_file_path'] = command['server_file_path']
             new_command = Commands(host, operationTypes.DOWNLOAD,
                                    client_file_path=command['client_file_path'],
                                    analyst_file_path=command['analyst_file_path'],
@@ -573,6 +587,7 @@ class AnalystUpload(Resource):
     def post(self):
         host = request.args['host']
         cid = request.args['cid']
+
         command = Commands.query.filter_by(hostname=host, command_id=cid).first()
         if not command:
             return {'status_code':'404',
@@ -580,16 +595,26 @@ class AnalystUpload(Resource):
                     'error': "Command id '{}' does not exist.".format(cid)}
         command.filesize = int(request.args['filesize'])
 
-        # see if a file by the same name and size already exists
+
+        # see if a file by the same name and md5 already exists 
         if os.path.exists(os.path.join(BASE_DIR,command.server_file_path)):
-            statinfo = os.stat(os.path.join(BASE_DIR,command.server_file_path))
-            if command.filesize == statinfo.st_size:
+            # get md5 of file
+            md5_hasher = md5()
+            with open(os.path.join(BASE_DIR,command.server_file_path), 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b''):
+                    md5_hasher.update(chunk)
+            file_md5 = md5_hasher.hexdigest().lower()
+
+            if request.args['md5'] == file_md5:
                 command.status = cmdStatusTypes.PENDING
                 db.session.commit()
                 logger.warn("File by same name and size already exists")
                 command_dict = command.to_dict()
-                command_dict['warn'] = "File by same name and size already exists on server at {}".format(command.server_file_path)
+                command_dict['warn'] = "File by same name and md5 already exists on server at {}".format(command.server_file_path)
                 return command_dict
+            else:
+                logger.warn("over writing file by same name but with different md5 hash")
+                os.remove(os.path.join(BASE_DIR,command.server_file_path))
 
         stream_error = receive_streamed_data(command)
 

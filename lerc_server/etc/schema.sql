@@ -2,7 +2,7 @@
 CREATE DATABASE lerc;
 USE lerc;
 
-CREATE TABLE clients (hostname VARCHAR(40), status enum('ONLINE','OFFLINE','UNKNOWN','UNINSTALLED'), install_date DATETIME, company_id INT(11), last_activity DATETIME, sleep_cycle INT(11) DEFAULT 900, id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY);
+CREATE TABLE clients (hostname VARCHAR(40), status enum('ONLINE','OFFLINE','UNKNOWN','UNINSTALLED'), install_date DATETIME, company_id INT(11), last_activity DATETIME, sleep_cycle INT(11) DEFAULT 900, id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY), version VARCHAR(20);
 
 CREATE UNIQUE INDEX host_x ON clients(hostname);
 
