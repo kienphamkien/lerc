@@ -9,7 +9,9 @@ import coloredlogs
 import pprint
 import lerc_api
 
+# will likely need to changes these local imports to lerc_control.* after pip3 setup is complete
 import collect
+import deploy_lerc
 
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
@@ -37,7 +39,8 @@ if __name__ == "__main__":
     parser_run.add_argument('command', help='The shell command for the host to execute`')
     parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
 
-    parser_collect = subparsers.add_parser('collect', help="perform a full lr.exe collection on the host")
+    parser_collect = subparsers.add_parser('collect', help="Default (no argumantes): perform a full lr.exe collection")
+    parser_collect.add_argument('-b', '--browsing-history', action='store_true', help='Collect browsing history with BrowsingHistoryView.exe')
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
     parser_upload.add_argument('file_path', help='the file path on the client')
@@ -60,6 +63,7 @@ if __name__ == "__main__":
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
     parser_contain.add_argument('-on', action='store_true', help="turn on containment")
     parser_contain.add_argument('-off', action='store_true', help="turn off containment")
+    parser_contain.add_argument('-s', '--status', action='store_true', help="Get containment status of host")
 
     args = parser.parse_args()
 
@@ -67,18 +71,23 @@ if __name__ == "__main__":
         logging.getLogger('lerc_api').setLevel(logging.DEBUG)
         coloredlogs.install(level='DEBUG', logger=logger)
 
-    profile=args.environment if args.environment else 'default'
+    host = args.hostname
+    # create a lerc session object
+    ls = lerc_api.lerc_session() 
 
+    # does a lerc by this hostname exist?
+    client = ls.check_host(host=host)
+    #if client and 'status' in client:
+    #    if client['status'] == 'UNINSTALLED' or client['status'] == 'UNKNOWN':
+    #        print("")
+
+    profile=args.environment if args.environment else 'default'
     if args.instruction == 'collect':
         if not args.debug:
             logging.getLogger('lerc_api').setLevel(logging.WARNING)
         collect.full_collection(args.hostname, profile=profile)
         #pprint.pprint(commands)
         sys.exit(0)
-
-    host = args.hostname
-
-    ls = lerc_api.lerc_session(host=host)
 
     result = None
     if args.instruction == 'run':
@@ -93,6 +102,8 @@ if __name__ == "__main__":
             ls.contain()
         elif args.off:
             ls.release_containment()
+        elif args.status:
+            print("Containment status check not yet implemented.")
 
     elif args.instruction == 'download':
         # if client_file_path is not specified the client will write the file to it's local dir

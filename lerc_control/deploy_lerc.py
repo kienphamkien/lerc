@@ -19,7 +19,7 @@ from cbapi.response import *
 from cbapi.errors import ApiError, ObjectNotFoundError, TimeoutError
 
 import lerc_api
-import logging, logging.config
+import logging
 
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
@@ -35,8 +35,7 @@ coloredlogs.install(level='DEBUG', logger=logger)
 
 
 HOME_DIR = os.path.dirname(os.path.realpath(__file__)) 
-#logging_config_path = os.path.join(HOME_DIR, 'etc', 'logging.ini')
-#logging.config.fileConfig(logging_config_path)
+
 
 def eastern_time(timestamp):
     eastern_timebase = tz.gettz('America/New_York')
@@ -72,8 +71,33 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
 
     hostname = sensor.hostname
     default_lerc_path = '/opt/lerc_control/lercSetup.msi'
-    if lerc_installer_path:
-        default_lerc_path = lerc_installer_path
+
+    if lerc_installer_path is None:
+        config = lerc_api.load_config('default', required_keys=['client_installer'])
+        lerc_installer_path = config['default']['client_installer']
+
+    # create lerc session
+    ls = lerc_api.lerc_session()
+    # check and see if the client's already installed
+    client = None
+    try:
+        client = ls.check_host(hostname)
+    except:
+        logging.warning("Can't reach the lerc control server")
+
+    previously_installed = proceed_with_force = None
+    if client and 'error' not in client:
+        if client['status'] != 'UNINSTALLED':
+            errmsg = "lerc server reports the client is already installed on a system with this hostname:\n{}"
+            errmsg = errmsg.format(pprint.pformat(client))
+            logging.warning(errmsg)
+            proceed_with_force = input("Proceed with fresh install? (y/n) [n] ") or 'n'
+            proceed_with_force = True if proceed_with_force == 'y' else False
+            if not proceed_with_force:
+                return None
+        else:
+            previously_installed = True
+            logging.info("A client was previously uninstalled on this host: {}".format(pprint.pformat(client)))
 
     lr_session = None
     try:
@@ -82,30 +106,6 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
     except Exception as e:
         logging.error("Failed to start Cb live response session on {}".format(hostname))
         return False
-
-    # create lerc session
-    ls = lerc_api.lerc_session()
-    # check and see if the client's already installed
-    result = None
-    try:
-        result = ls.check_host(hostname)
-    except:
-        logging.warning("Can't reach the lerc control server")
-
-    previously_installed = proceed_with_force = None
-    if result and 'client' in result:
-        client = result['client']
-        if client['status'] != 'UNINSTALLED':
-            errmsg = "lerc server reports the client is already installed on a system with this hostname:\n{}"
-            errmsg = errmsg.format(pprint.pformat(client))
-            logging.warning(errmsg)
-            proceed_with_force = input("Proceed with fresh install? (y/n) [n] ") or 'n'
-            proceed_with_force = True if proceed_with_force == 'y' else False
-            if not proceed_with_force:
-                return
-        else:
-            previously_installed = True
-            logging.info("A client was previously uninstalled on this host: {}".format(pprint.pformat(client)))
 
     with lr_session:
 
@@ -123,7 +123,7 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
 
         logging.info("~ dropping current Live Endpoint Response Client msi onto {}".format(hostname))
         filedata = None
-        with open(default_lerc_path, 'rb') as f:
+        with open(lerc_installer_path, 'rb') as f:
             filedata = f.read()
         try:
             lr_session.put_file(filedata, "C:\\Windows\\Carbonblack\\lercSetup.msi")
@@ -156,69 +156,42 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
 
     for i in range(attempts):
         try:
-            result = ls.check_host(hostname)
+            client = ls.check_host(hostname)
         except:
             logging.warning("Can't reach the lerc control server")
             break
-        if result:
-            if 'error' not in result:
-                if result['client']['status'] != 'UNINSTALLED':
+        if client:
+            if 'error' not in client:
+                if client['status'] != 'UNINSTALLED':
                     break
         logging.info("~ giving the client {} more seconds".format(attempts*wait - wait*i))
         time.sleep(wait)
 
-    if not result:
+    if not client:
         logging.warning("failed to auto-confirm install with lerc server.")
         _get_install_log()
         return None
-    elif 'error' in result:
-        logging.error("'{}' returned from server. Client hasn't checked in.".format(result['error']))
+    elif 'error' in client:
+        logging.error("'{}' returned from server. Client hasn't checked in.".format(client['error']))
         _get_install_log()
         return False
-    elif previously_installed and result['client']['status'] == 'UNINSTALLED':
-        logger.warning("Failed to auto-confirm install. Client hasn't checked in.")
+    elif previously_installed and client['status'] == 'UNINSTALLED':
+        logging.warning("Failed to auto-confirm install. Client hasn't checked in.")
         _get_install_log()
         return False
 
-    client = result['client'] 
     logging.info("Client installed on {} at '{}' - status={} - last check-in='{}'".format(hostname,
                                  client['install_date'], client['status'], client['last_activity']))
-    return result
+    return client
 
 
-def main(argv):
-
-    parser = argparse.ArgumentParser(description="put file on CB sensor")
-    parser.add_argument('company', choices=auth.CredentialStore("response").get_profiles(),
-                        help='specify an environment you want to work with.')
-
-    parser.add_argument('hostname', help="the name of the host to deploy the client to")
-    parser.add_argument('-p', '--package', help="the msi lerc package to install")
-    args = parser.parse_args()
-
-    print(time.ctime() + "... starting")
-
-    # ignore the proxy
-    del os.environ['http_proxy']
-    del os.environ['https_proxy']
-
-    default_lerc_path = '/opt/lerc/lercSetup.msi'
-    if args.package:
-        default_lerc_path = args.package
-
-    # lazy hack
-    default_profile = auth.default_profile
-    default_profile['lerc_install_cmd'] = None
-    config = auth.CredentialStore("response").get_credentials(profile=args.company)
-
-    cb = CbResponseAPI(profile=args.company) 
-
-   # Get the right sensor 
+#Get the right CarbonBlack sensor
+def CbSensor_search(profile, hostname):
+    cb = CbResponseAPI(profile=profile)
     sensor = None
-    hostname = args.hostname
     try:
         logging.debug("Getting the sensor object from carbonblack")
-        sensor = cb.select(Sensor).where("hostname:{}".format(hostname)).one()
+        return cb.select(Sensor).where("hostname:{}".format(hostname)).one()
     except TypeError as e:
         # Appears to be bug in cbapi library here -> site-packages/cbapi/query.py", line 34, in one
         # Raise MoreThanOneResultError(message="0 results for query {0:s}".format(self._query))
@@ -256,9 +229,11 @@ def main(argv):
                     user_choice = int(input(choice_string) or default_sid)
                     for s in result:
                         if user_choice == int(s.id):
-                            sensor = s
-                            break
+                            return s
             except Exception as e:
+                if sensor is None:
+                    logging.error("A sensor by hostname '{}' wasn't found in this environment".format(hostname))
+                    return False
                 logging.error("{}".format(str(e)))
                 return False
     except Exception as e:
@@ -266,10 +241,32 @@ def main(argv):
         return False
 
 
-    result = deploy_lerc(sensor, config['lerc_install_cmd'], lerc_installer_path=default_lerc_path)
+def main(argv):
+
+    parser = argparse.ArgumentParser(description="put file on CB sensor")
+    parser.add_argument('company', choices=auth.CredentialStore("response").get_profiles(),
+                        help='specify an environment you want to work with.')
+
+    parser.add_argument('hostname', help="the name of the host to deploy the client to")
+    parser.add_argument('-p', '--package', help="the msi lerc package to install")
+    args = parser.parse_args()
+
+    print(time.ctime() + "... starting")
+
+    # ignore the proxy
+    #del os.environ['https_proxy']
+
+    # get the config items we need
+    required_keys = ['client_installer', 'lerc_install_cmd']
+    config = lerc_api.load_config(required_keys=required_keys)
+    default_lerc_path = config['default']['client_installer'] #'/opt/lerc/lercSetup.msi'
+
+    sensor = CbSensor_search(args.company, args.hostname)
+
+    result = deploy_lerc(sensor, config[args.company]['lerc_install_cmd'], lerc_installer_path=args.package)
     if result:
         print()
-        pprint.pprint(result['client'], indent=4)
+        pprint.pprint(result, indent=4)
         print()
 
 

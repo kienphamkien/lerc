@@ -56,7 +56,12 @@ def load_config(profile='default', required_keys=[]):
 
     if isinstance(required_keys, list) and required_keys:
         for key in required_keys:
+            missing = False
             if not config.has_option(profile, key):
+                for section in config.sections():
+                    if not config.has_option(section, key):
+                        missing = True
+            if missing:
                 logger.error("Missing required config item: {}".format(key))
 
     return config
@@ -104,7 +109,7 @@ class lerc_session():
         self.host = host
         self.logger.debug("attaching to host '{}'..".format(host))
 
-    def __init__(self, profile='default', server=None, host=None, cid=None, chunk_size=4096):
+    def __init__(self, profile='default', server=None, host=None, chunk_size=4096):
         self.config = load_config(profile)
         self.profile = profile
         if server:
@@ -140,6 +145,10 @@ class lerc_session():
     @property
     def get_profile(self):
         return self.profile
+
+    @property
+    def hostname(self):
+        return self.host
 
     def _issue_command(self, command):
         # check the host, make the post
@@ -332,25 +341,25 @@ class lerc_session():
             self.get_results()
         return None
 
-
     def check_host(self, host=None):
-        """Get the status of a client by hostname.
+        """Get the status of a client by hostname. Will attach the lerc_session to the hostname if the client exists.
 
         :param str host: (optional) The hostname of a lerc client.
-        :return: A lerc client summary
-        :rtype: dict
+        :return: A lerc client summary or False
+        :rtype: dict representation of client or False
         """
-        if host:
-            self.attach_host(host)
-        if not self.host:
+        if not host and not self.host:
             self.logger.error("No host specified.")
             return False
-        r = requests.get(self.server+'/command', params={'host': self.host}, cert=self.cert).json()
+        if not host:
+            host = self.host
+        r = requests.get(self.server+'/command', params={'host': host}, cert=self.cert).json()
         if 'client' in r:
+            self.attach_host(host)
             return r['client']
         else:
-            self.logger.error("{}".format(r))
-            return r
+            self.logger.warn("{}".format(r))
+            return False
 
     def get_hosts(self):
         """Yeild dictionary representations of lerc clients.
@@ -477,7 +486,9 @@ class lerc_session():
 
         self.logger.info("containing host..")
         status = self.check_host()
-        status = status['client']
+        if not status:
+            self.logger.error("Not attached to a host")
+            return False
         safe_contain_bat_path = self.config[self.profile]['containment_bat']
         contain_cmd = self.config[self.profile]['contain_cmd']
 
@@ -513,6 +524,9 @@ class lerc_session():
 
         :return: True on success.
         """
+        if self.host is None:
+            self.logger.error("Not attached to a host")
+            return False
         self.Run("netsh advfirewall reset && netsh advfirewall show allprofiles")
         self.wait_for_command(self.check_command())
         self.logger.info("Host containment removed at: {}".format(datetime.now()))
