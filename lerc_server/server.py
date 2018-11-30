@@ -142,6 +142,12 @@ def command_manager(host, remove_cid=None):
         db.session.commit()
         logger.info("Removed command id:{} for host:{}".format(remove_cid, host))
         return True
+    # An error occured somewhere if a client fetched without a command moving out of the STARTED state
+    started_command = Commands.query.filter(Commands.hostname==host).filter(Commands.status==cmdStatusTypes.STARTED).order_by(Commands.command_id.asc()).first()
+    if started_command:
+        logger.error("{} fetched without finishing CID={} - Changing command statue to UNKNOWN.".format(started_command.hostname, started_command.command_id))
+        started_command.status = cmdStatusTypes.UNKNOWN
+        db.session.commit()
     # Any open commands?
     command = Commands.query.filter(Commands.hostname==host).filter(Commands.status==cmdStatusTypes.PENDING).order_by(Commands.command_id.asc()).first()
     if command:
@@ -263,6 +269,9 @@ class Pipe(Resource):
             post_size = int(request.args['size'])
         command.filesize = command.filesize + post_size
         command.status = cmdStatusTypes.STARTED
+        # update last_activity
+        client = Clients.query.filter_by(hostname=host).one()
+        client.last_activity = datetime.now()
         db.session.commit()
 
         # Note: the client posts run results as they come in or after a certain timeout with no output from running command
@@ -317,6 +326,9 @@ class Upload(Resource):
             logger.info("Receiving Upload result from {} for command {}".format(host, cid))
 
         command.status = cmdStatusTypes.STARTED
+        # update last_activity
+        client = Clients.query.filter_by(hostname=host).one()
+        client.last_activity = datetime.now()
         db.session.commit()
         stream_error = receive_streamed_data(command)
 
@@ -395,6 +407,9 @@ class Download(Resource):
                                                                            error_message))
 
         command.status = cmdStatusTypes.STARTED
+        # update last_activity
+        client = Clients.query.filter_by(hostname=host).one()
+        client.last_activity = datetime.now()
         db.session.commit()
         return Response(stream_with_context(stream_response()))
 
@@ -579,7 +594,7 @@ class Command(Resource):
                 error_log = json.load(f)
             result['error'] = error_log['error']
             result['time'] = error_log['time']
-            logger.debug(result['error'], result['time'])
+            logger.debug("{} - {}".format(result['error'], result['time']))
             return result
 
         return command.to_dict()
@@ -674,6 +689,7 @@ class AnalystDownload(Resource):
             return Response(stream_with_context(stream_results(command)))
 
         if command.status != cmdStatusTypes.COMPLETE:
+            logger.warn("Analyst attempting to get a command in state '{}'".format(command.status.name))
             result = command.to_dict()
             result['warn'] = "Command is not COMPLETE."
             return result
