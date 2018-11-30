@@ -301,9 +301,15 @@ class lerc_session():
                              .format(position, self.command['filesize']))
         else:
             self.logger.debug("getting results for {}".format(cid))
-        raw_bytes = None
+
         arguments = {'position': position, 'cid': cid}
         headers = {"Accept-Encoding": '0'}
+
+        if self.command['status'] != 'COMPLETE' or self.command['status'] != 'STARTED':
+            self.logger.warn("Any results for commands in state={} can not be reliably streamed.".format(self.command['status']))
+            return requests.get(self.server+'/command/download', cert=self.cert, params=arguments).json()
+
+        raw_bytes = None
         total_chunks, remaining_bytes = divmod(self.command['filesize'] - position, self.chunk_size)
         with closing(requests.get(self.server+'/command/download', cert=self.cert, params=arguments, headers=headers, stream=True)) as r:
             try:
