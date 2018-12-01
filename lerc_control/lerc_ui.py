@@ -13,6 +13,8 @@ import lerc_api
 import collect
 import deploy_lerc
 
+from scripted import execute_script
+
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - [%(levelname)s] %(message)s')
@@ -65,6 +67,11 @@ if __name__ == "__main__":
     parser_contain.add_argument('-off', action='store_true', help="turn off containment")
     parser_contain.add_argument('-s', '--status', action='store_true', help="Get containment status of host")
 
+    parser_script = subparsers.add_parser('script', help="run a scripted routine on thie lerc.")
+    parser_script.add_argument('-l', '--list-scripts', action='store_true', help="list built-in scripts availble to lerc_ui")
+    parser_script.add_argument('-s', '--script-name', help="provide the name of a build in script to run")
+    parser_script.add_argument('-f', '--file-path', help="the path to a custom script you want to execute")
+
     args = parser.parse_args()
 
     if args.debug:
@@ -72,14 +79,10 @@ if __name__ == "__main__":
         coloredlogs.install(level='DEBUG', logger=logger)
 
     host = args.hostname
-    # create a lerc session object
+    # create a lerc session object and make sure the host exists
+    # by checking for it and getting it's dict representation
     ls = lerc_api.lerc_session() 
-
-    # does a lerc by this hostname exist?
     client = ls.check_host(host=host)
-    #if client and 'status' in client:
-    #    if client['status'] == 'UNINSTALLED' or client['status'] == 'UNKNOWN':
-    #        print("")
 
     profile=args.environment if args.environment else 'default'
     if args.instruction == 'collect':
@@ -88,6 +91,34 @@ if __name__ == "__main__":
         collect.full_collection(args.hostname, profile=profile)
         #pprint.pprint(commands)
         sys.exit(0)
+
+    if args.instruction == 'script':
+        #logging.getLogger('lerc_api').setLevel(logging.WARNING)
+        config = lerc_api.load_config()
+        if args.list_scripts:
+            if not config.has_section('scripts'):
+                print("\nNo pre-existing scripts have been made availble.")
+                sys.exit(0)           
+            print("\nAvailable scripts:")
+            for sname in config['scripts']:
+                print("\t{}".format(sname))
+            print()
+            sys.exit(0)
+        elif args.script_name:
+            if not config.has_option('scripts', args.script_name):
+                print("{} is not a defined script".format(args.script_name))
+            script_path = config['scripts'][args.script_name]
+            commands = execute_script(args.hostname, script_path)
+            sys.exit(0)
+        elif args.file_path:
+            if not os.path.exists(args.file_path):
+                logger.error("Could not find script file at '{}'".format(args.file_path))
+                sys.exit(1)
+            commands = execute_script(args.hostname, args.file_path)
+            sys.exit(0)
+        else:
+            logger.info("No argument was specified for the script command. Exiting.")
+            sys.exit(0)
 
     result = None
     if args.instruction == 'run':

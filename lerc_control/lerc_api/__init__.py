@@ -305,7 +305,7 @@ class lerc_session():
         arguments = {'position': position, 'cid': cid}
         headers = {"Accept-Encoding": '0'}
 
-        if self.command['status'] != 'COMPLETE' or self.command['status'] != 'STARTED':
+        if self.command['status'] != 'COMPLETE' and self.command['status'] != 'STARTED':
             self.logger.warn("Any results for commands in state={} can not be reliably streamed.".format(self.command['status']))
             return requests.get(self.server+'/command/download', cert=self.cert, params=arguments).json()
 
