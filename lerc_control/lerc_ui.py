@@ -85,10 +85,11 @@ if __name__ == "__main__":
     # by checking for it and getting it's dict representation
     ls = lerc_api.lerc_session() 
     client = ls.check_host(host=host)
-    bad_status = None
-    if 'status' in client and client['status'] == 'UNINSTALLED' or client['status'] == 'UNKNOWN':
-        logger.info("Non-working client status : {}".format(client['status']))
-        bad_status = True
+    bad_status = False
+    if client:
+        if 'status' in client and client['status'] == 'UNINSTALLED' or client['status'] == 'UNKNOWN':
+            logger.info("Non-working client status : {}".format(client['status']))
+            bad_status = True
 
     if not client or bad_status:
         config = ls.get_config
