@@ -7,10 +7,13 @@ import argparse
 import logging
 import coloredlogs
 import pprint
-
 import lerc_api
 
-from configparser import ConfigParser
+# will likely need to changes these local imports to lerc_control.* after pip3 setup is complete
+import collect
+import deploy_lerc
+
+from scripted import execute_script
 
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
@@ -22,31 +25,6 @@ logging.getLogger('lerc_api').setLevel(logging.INFO)
 
 logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
-
-
-def load_config(profile='default'):
-    config = ConfigParser()
-    config_paths = []
-    config_paths.append(os.path.join(os.getcwd(),'etc','lerc.ini'))
-    config_paths.append('/opt/lerc_control/etc/lerc.ini')
-    config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
-    for cp in config_paths:
-        try:
-            if os.path.exists(cp):
-                config.read(cp)
-                logger.debug("Reading config file at {}.".format(cp))
-                break
-        except:
-            pass
-    else:
-        logger.critical("No configuration file defined along search paths: {}".format(config_paths))
-
-    try:
-        config[profile]
-    except:
-        logger.critical("No section named '{}' in configuration file".format(profile))
-        sys.exit(1)
-    return config
 
 
 if __name__ == "__main__":
@@ -61,6 +39,10 @@ if __name__ == "__main__":
 
     parser_run = subparsers.add_parser('run', help="Run a shell command on the host. BE CAREFUL!")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
+    parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
+
+    parser_collect = subparsers.add_parser('collect', help="Default (no argumantes): perform a full lr.exe collection")
+    parser_collect.add_argument('-b', '--browsing-history', action='store_true', help='Collect browsing history with BrowsingHistoryView.exe')
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
     parser_upload.add_argument('file_path', help='the file path on the client')
@@ -83,6 +65,12 @@ if __name__ == "__main__":
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
     parser_contain.add_argument('-on', action='store_true', help="turn on containment")
     parser_contain.add_argument('-off', action='store_true', help="turn off containment")
+    parser_contain.add_argument('-s', '--status', action='store_true', help="Get containment status of host")
+
+    parser_script = subparsers.add_parser('script', help="run a scripted routine on thie lerc.")
+    parser_script.add_argument('-l', '--list-scripts', action='store_true', help="list built-in scripts availble to lerc_ui")
+    parser_script.add_argument('-s', '--script-name', help="provide the name of a build in script to run")
+    parser_script.add_argument('-f', '--file-path', help="the path to a custom script you want to execute")
 
     args = parser.parse_args()
 
@@ -90,32 +78,67 @@ if __name__ == "__main__":
         logging.getLogger('lerc_api').setLevel(logging.DEBUG)
         coloredlogs.install(level='DEBUG', logger=logger)
 
-    profile=args.environment if args.environment else 'default'
-    config = load_config(profile)
-    if 'ignore_system_proxy' in config[profile]:
-        if config[profile].getboolean('ignore_system_proxy'):
-            # route direct
-            if 'https_proxy' in os.environ:
-                del os.environ['https_proxy']
-
     host = args.hostname
+    # create a lerc session object and make sure the host exists
+    # by checking for it and getting it's dict representation
+    ls = lerc_api.lerc_session() 
+    client = ls.check_host(host=host)
 
-    ls = lerc_api.lerc_session(host=host)
+    profile=args.environment if args.environment else 'default'
+    if args.instruction == 'collect':
+        if not args.debug:
+            logging.getLogger('lerc_api').setLevel(logging.WARNING)
+        collect.full_collection(args.hostname, profile=profile)
+        #pprint.pprint(commands)
+        sys.exit(0)
+
+    if args.instruction == 'script':
+        #logging.getLogger('lerc_api').setLevel(logging.WARNING)
+        config = lerc_api.load_config()
+        if args.list_scripts:
+            if not config.has_section('scripts'):
+                print("\nNo pre-existing scripts have been made availble.")
+                sys.exit(0)           
+            print("\nAvailable scripts:")
+            for sname in config['scripts']:
+                print("\t{}".format(sname))
+            print()
+            sys.exit(0)
+        elif args.script_name:
+            if not config.has_option('scripts', args.script_name):
+                print("{} is not a defined script".format(args.script_name))
+            script_path = config['scripts'][args.script_name]
+            commands = execute_script(args.hostname, script_path)
+            sys.exit(0)
+        elif args.file_path:
+            if not os.path.exists(args.file_path):
+                logger.error("Could not find script file at '{}'".format(args.file_path))
+                sys.exit(1)
+            commands = execute_script(args.hostname, args.file_path)
+            sys.exit(0)
+        else:
+            logger.info("No argument was specified for the script command. Exiting.")
+            sys.exit(0)
 
     result = None
     if args.instruction == 'run':
-        result = ls.Run(args.command)
+        if args.async:
+            print(args.async)
+            result = ls.Run(args.command, async=args.async)
+        else:
+            result = ls.Run(args.command)
 
     elif args.instruction == 'contain':
         if args.on:
             ls.contain()
         elif args.off:
             ls.release_containment()
+        elif args.status:
+            print("Containment status check not yet implemented.")
 
     elif args.instruction == 'download':
         # if client_file_path is not specified the client will write the file to it's local dir
         analyst_file_path = os.path.abspath(args.file_path)
-        print(analyst_file_path)
         file_name = args.file_path[args.file_path.rfind('/')+1:]
         if args.local_file is None:
             args.local_file = file_name
@@ -154,9 +177,8 @@ if __name__ == "__main__":
         print()
         sys.exit()
     else:
-        result = ls.check_host()
-        if 'client' in result:
-            pprint.pprint(result['client'])
+        client = ls.check_host()
+        pprint.pprint(client)
         print()
         sys.exit()
 
