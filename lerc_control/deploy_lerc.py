@@ -30,7 +30,7 @@ logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 logging.getLogger('lerc_api').setLevel(logging.INFO)
 logging.getLogger('cbapi').setLevel(logging.WARNING)
 
-logger = logging.getLogger()
+logger = logging.getLogger("lerc_control."+__name__)
 coloredlogs.install(level='DEBUG', logger=logger)
 
 
@@ -51,14 +51,14 @@ def go_live(sensor):
     while time.time() - start_time < timeout:
         try:
             lr_session = sensor.lr_session()
-            logging.info("LR session started at {}".format(time.ctime()))
+            logger.info("LR session started at {}".format(time.ctime()))
             break
         except TimeoutError:
             elapsed_time = time.time() - start_time
             if current_day != elapsed_time // 86400:
                 current_day+=1
-                logging.info("24 hours of timeout when polling for LR session")
-                logging.info("Attempting LR session again on {} @ {}".format(args.sensor,
+                logger.info("24 hours of timeout when polling for LR session")
+                logger.info("Attempting LR session again on {} @ {}".format(args.sensor,
                                                                         time.ctime()))
     return lr_session
 
@@ -66,7 +66,7 @@ def go_live(sensor):
 def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
 
     if not isinstance(sensor, models.Sensor):
-        logging.error("Cb models.Sensor object required.")
+        logger.error("Cb models.Sensor object required.")
         return False
 
     hostname = sensor.hostname
@@ -83,45 +83,45 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
     try:
         client = ls.check_host(hostname)
     except:
-        logging.warning("Can't reach the lerc control server")
+        logger.warning("Can't reach the lerc control server")
 
     previously_installed = proceed_with_force = None
     if client and 'error' not in client:
         if client['status'] != 'UNINSTALLED':
             errmsg = "lerc server reports the client is already installed on a system with this hostname:\n{}"
             errmsg = errmsg.format(pprint.pformat(client))
-            logging.warning(errmsg)
+            logger.warning(errmsg)
             proceed_with_force = input("Proceed with fresh install? (y/n) [n] ") or 'n'
             proceed_with_force = True if proceed_with_force == 'y' else False
             if not proceed_with_force:
                 return None
         else:
             previously_installed = True
-            logging.info("A client was previously uninstalled on this host: {}".format(pprint.pformat(client)))
+            logger.info("A client was previously uninstalled on this host: {}".format(pprint.pformat(client)))
 
     lr_session = None
     try:
-        logging.info(".. attempting to go live on the host with CarbonBlack..")
+        logger.info(".. attempting to go live on the host with CarbonBlack..")
         lr_session = go_live(sensor)
     except Exception as e:
-        logging.error("Failed to start Cb live response session on {}".format(hostname))
+        logger.error("Failed to start Cb live response session on {}".format(hostname))
         return False
 
     with lr_session:
 
         if proceed_with_force:
             uninstall_cmd = "msiexec /x C:\Windows\Carbonblack\lercSetup.msi /quiet /qn /norestart /log C:\Windows\Carbonblack\lerc_Un-Install.log"
-            logging.info("~ checking for installed lerc client on host..")
+            logger.info("~ checking for installed lerc client on host..")
             result = lr_session.create_process("sc query lerc", wait_timeout=60, wait_for_output=True)
             result = result.decode('utf-8')
-            logging.info("~ Got service query result:\n{}".format(result))
+            logger.info("~ Got service query result:\n{}".format(result))
             if 'SERVICE_NAME' in result and 'lerc' in result:
-                logging.info("~ attempting to uninstall lerc..")
+                logger.info("~ attempting to uninstall lerc..")
                 result = lr_session.create_process(uninstall_cmd, wait_timeout=60, wait_for_output=True)
-                logging.info("~ Post uninstall service query:\n {}".format(lr_session.create_process("sc query lerc",
+                logger.info("~ Post uninstall service query:\n {}".format(lr_session.create_process("sc query lerc",
                                                                             wait_timeout=60, wait_for_output=True).decode('utf-8')))
 
-        logging.info("~ dropping current Live Endpoint Response Client msi onto {}".format(hostname))
+        logger.info("~ dropping current Live Endpoint Response Client msi onto {}".format(hostname))
         filedata = None
         with open(lerc_installer_path, 'rb') as f:
             filedata = f.read()
@@ -129,58 +129,58 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
             lr_session.put_file(filedata, "C:\\Windows\\Carbonblack\\lercSetup.msi")
         except Exception as e:
             if 'ERROR_FILE_EXISTS' in str(e):
-                logging.info("~ lercSetup.msi already on host. Deleting..")
+                logger.info("~ lercSetup.msi already on host. Deleting..")
                 lr_session.delete_file("C:\\Windows\\Carbonblack\\lercSetup.msi")
                 lr_session.put_file(filedata, "C:\\Windows\\Carbonblack\\lercSetup.msi")
                 #pass
             else:
                 raise e
 
-        logging.info("~ installing the lerc service")
+        logger.info("~ installing the lerc service")
         result = lr_session.create_process(install_cmd, wait_timeout=60, wait_for_output=True)
 
     def _get_install_log(logfile=None):
-        logging.info("Getting install log..")
+        logger.info("Getting install log..")
         logfile = logfile if logfile else r"C:\\Windows\\Carbonblack\\lerc_install.log"
         content = lr_session.get_file(logfile)
         with open(hostname+"_lerc_install.log", 'wb') as f:
             f.write(content)
-        logging.info("wrote log file to {}_lerc_install.log".format(hostname))
+        logger.info("wrote log file to {}_lerc_install.log".format(hostname))
 
 
     wait = 5 #seconds
     attempts = 6
     if previously_installed:
         attempts += attempts
-    logging.info("~ Giving client up to {} seconds to check in with the lerc control server..".format(attempts*wait))
+    logger.info("~ Giving client up to {} seconds to check in with the lerc control server..".format(attempts*wait))
 
     for i in range(attempts):
         try:
             client = ls.check_host(hostname)
         except:
-            logging.warning("Can't reach the lerc control server")
+            logger.warning("Can't reach the lerc control server")
             break
         if client:
             if 'error' not in client:
                 if client['status'] != 'UNINSTALLED':
                     break
-        logging.info("~ giving the client {} more seconds".format(attempts*wait - wait*i))
+        logger.info("~ giving the client {} more seconds".format(attempts*wait - wait*i))
         time.sleep(wait)
 
     if not client:
-        logging.warning("failed to auto-confirm install with lerc server.")
+        logger.warning("failed to auto-confirm install with lerc server.")
         _get_install_log()
         return None
     elif 'error' in client:
-        logging.error("'{}' returned from server. Client hasn't checked in.".format(client['error']))
+        logger.error("'{}' returned from server. Client hasn't checked in.".format(client['error']))
         _get_install_log()
         return False
     elif previously_installed and client['status'] == 'UNINSTALLED':
-        logging.warning("Failed to auto-confirm install. Client hasn't checked in.")
+        logger.warning("Failed to auto-confirm install. Client hasn't checked in.")
         _get_install_log()
         return False
 
-    logging.info("Client installed on {} at '{}' - status={} - last check-in='{}'".format(hostname,
+    logger.info("Client installed on {} at '{}' - status={} - last check-in='{}'".format(hostname,
                                  client['install_date'], client['status'], client['last_activity']))
     return client
 
@@ -190,7 +190,7 @@ def CbSensor_search(profile, hostname):
     cb = CbResponseAPI(profile=profile)
     sensor = None
     try:
-        logging.debug("Getting the sensor object from carbonblack")
+        logger.debug("Getting the sensor object from carbonblack")
         return cb.select(Sensor).where("hostname:{}".format(hostname)).one()
     except TypeError as e:
         # Appears to be bug in cbapi library here -> site-packages/cbapi/query.py", line 34, in one
@@ -201,7 +201,7 @@ def CbSensor_search(profile, hostname):
                 result = cb.select(Sensor).where("hostname:{}".format(hostname))
                 if isinstance(result[0], models.Sensor):
                     print()
-                    logging.warn("MoreThanOneResult Error searching for {0:s}".format(hostname))
+                    logger.warn("MoreThanOneResult Error searching for {0:s}".format(hostname))
                     print("\nResult breakdown:")
                     sensor_ids = []
                     for s in result:
@@ -232,12 +232,12 @@ def CbSensor_search(profile, hostname):
                             return s
             except Exception as e:
                 if sensor is None:
-                    logging.error("A sensor by hostname '{}' wasn't found in this environment".format(hostname))
+                    logger.warning("A sensor by hostname '{}' wasn't found in this environment".format(hostname))
                     return False
-                logging.error("{}".format(str(e)))
+                logger.error("{}".format(str(e)))
                 return False
     except Exception as e:
-        logging.error("{}".format(str(e)))
+        logger.error("{}".format(str(e)))
         return False
 
 

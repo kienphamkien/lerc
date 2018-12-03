@@ -20,7 +20,7 @@ def load_config(profile='default', required_keys=[]):
     """Load lerc configuration. Configuration files are looked for in the following locations::
         /etc/lerc_control/lerc.ini
         /opt/lerc/lerc_control/etc/lerc.ini
-        ~/<current-user>/lerc_control/lerc.ini
+        ~/<current-user>/.lerc_control/lerc.ini
         /<python-lib-where-lerc_control-installed>/etc/lerc.ini
 
     Configuration items found in later config files take presendence over earlier ones.
@@ -364,7 +364,7 @@ class lerc_session():
             self.attach_host(host)
             return r['client']
         else:
-            self.logger.warn("{}".format(r))
+            self.logger.debug("{}".format(r))
             return False
 
     def get_hosts(self):

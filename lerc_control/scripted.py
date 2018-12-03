@@ -105,7 +105,7 @@ def execute_script(hostname, script_path):
             command_history[command] = cmd
             command_history[command]['get_results'] = get_results
             command_history[command]['write_results_path'] = write_results_path
-            logger.info("Issued : Run : Download - CID={} - {}".format(cmd['command_id'], run_string))
+            logger.info("Issued : Run - CID={} - {}".format(cmd['command_id'], run_string))
         elif op == 'DOWNLOAD':
             client_file_path = None
             if 'client_file_path' in script[command]:

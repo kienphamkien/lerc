@@ -22,6 +22,7 @@ logging.basicConfig(level=logging.DEBUG,
 logging.getLogger('requests').setLevel(logging.WARNING)
 logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 logging.getLogger('lerc_api').setLevel(logging.INFO)
+logging.getLogger('lerc_control').setLevel(logging.WARNING)
 
 logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
@@ -34,6 +35,7 @@ if __name__ == "__main__":
     parser.add_argument('-q', '--queue', action="store_true", help="return the entire command queue (despite status)")
     parser.add_argument('-e', '--environment', action="store", help="specify an environment to work with. Default='default'")
     parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG")
+    #parser.add_argument('-c', '--check', help="check on a specific command id")
 
     subparsers = parser.add_subparsers(dest='instruction') #title='subcommands', help='additional help')
 
@@ -42,7 +44,6 @@ if __name__ == "__main__":
     parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
 
     parser_collect = subparsers.add_parser('collect', help="Default (no argumantes): perform a full lr.exe collection")
-    parser_collect.add_argument('-b', '--browsing-history', action='store_true', help='Collect browsing history with BrowsingHistoryView.exe')
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
     parser_upload.add_argument('file_path', help='the file path on the client')
@@ -76,6 +77,7 @@ if __name__ == "__main__":
 
     if args.debug:
         logging.getLogger('lerc_api').setLevel(logging.DEBUG)
+        logging.getLogger('lerc_control').setLevel(logging.DEBUG)
         coloredlogs.install(level='DEBUG', logger=logger)
 
     host = args.hostname
@@ -83,7 +85,46 @@ if __name__ == "__main__":
     # by checking for it and getting it's dict representation
     ls = lerc_api.lerc_session() 
     client = ls.check_host(host=host)
+    bad_status = None
+    if 'status' in client and client['status'] == 'UNINSTALLED' or client['status'] == 'UNKNOWN':
+        logger.info("Non-working client status : {}".format(client['status']))
+        bad_status = True
 
+    if not client or bad_status:
+        config = ls.get_config
+        if config.has_option('default', 'cb_auto_deploy') and not config['default'].getboolean('cb_auto_deploy'):
+            logger.info("CarbonBlack auto-deployment turned off. Exiting..")
+            sys.exit(0)
+        logger.info("Attempting to deploy lerc with CarbonBlack..")
+        try:
+            from cbapi import auth
+            from deploy_lerc import deploy_lerc, CbSensor_search
+        except:
+            logger.error("Failed to import deployment functions from lerc_control.deploy_lerc OR cbapi.")
+            sys.exit(1)
+        logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.ERROR)
+        environments = auth.CredentialStore("response").get_profiles()
+        sensors = []
+        logger.debug("Trying to find the sensor in the available carbonblack environments.")
+        for env in environments:         
+            sensor = CbSensor_search(env, args.hostname)
+            if sensor:
+                logger.debug("Found sensor in {} environment".format(env))
+                sensors.append((env, sensor))
+        if len(sensors) > 1:
+            logger.error("A CarbonBlack Sensor was found by that hostname in multiple environments.")
+            sys.exit(1)
+        elif sensors:
+            logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.INFO)
+            sensor = sensors[0][1]
+            config = lerc_api.load_config(required_keys=['lerc_install_cmd', 'client_installer'])
+            result = deploy_lerc(sensor, config[sensors[0][0]]['lerc_install_cmd'], lerc_installer_path=config['default']['client_installer'])
+            if result:
+                logger.info("Successfully deployed lerc to this host: {}".format(pprint.pprint(result, indent=4)))
+        else:
+            logger.error("Didn't find a sensor in CarbonBlack by this hostname")
+            sys.exit(0)
+ 
     profile=args.environment if args.environment else 'default'
     if args.instruction == 'collect':
         if not args.debug:
