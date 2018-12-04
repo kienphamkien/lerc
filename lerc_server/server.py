@@ -269,8 +269,9 @@ class Pipe(Resource):
             post_size = int(request.args['size'])
         command.filesize = command.filesize + post_size
         command.status = cmdStatusTypes.STARTED
-        # update last_activity
+        # update last_activity and status
         client = Clients.query.filter_by(hostname=host).one()
+        client.status = clientStatusTypes.BUSY
         client.last_activity = datetime.now()
         db.session.commit()
 
@@ -326,8 +327,9 @@ class Upload(Resource):
             logger.info("Receiving Upload result from {} for command {}".format(host, cid))
 
         command.status = cmdStatusTypes.STARTED
-        # update last_activity
+        # update last_activity and status
         client = Clients.query.filter_by(hostname=host).one()
+        client.status = clientStatusTypes.BUSY
         client.last_activity = datetime.now()
         db.session.commit()
         stream_error = receive_streamed_data(command)
@@ -407,8 +409,9 @@ class Download(Resource):
                                                                            error_message))
 
         command.status = cmdStatusTypes.STARTED
-        # update last_activity
+        # update last_activity and status
         client = Clients.query.filter_by(hostname=host).one()
+        client.status = clientStatusTypes.BUSY
         client.last_activity = datetime.now()
         db.session.commit()
         return Response(stream_with_context(stream_response()))
@@ -444,6 +447,9 @@ class Error(Resource):
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
         command.log_file_path = "{}{}_{}_ERROR.log".format(LOG_DIR, host, cid)
         command.status = cmdStatusTypes.ERROR
+        # update last_activity
+        client = Clients.query.filter_by(hostname=host).one()
+        client.last_activity = datetime.now()
         db.session.commit()
         error_log = {'time': str(datetime.now()),
                      'command_id': str(command.command_id),

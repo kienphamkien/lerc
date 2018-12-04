@@ -45,7 +45,17 @@ def status_update():
             LOGGER.debug("Getting clients..")
             c.execute("SELECT * FROM clients")
             for client in c.fetchall():
-                if client['status'] != "UNKNOWN" and client['status'] != "UNINSTALLED" and client['status'] != "OFFLINE":
+                if client['status'] == "BUSY":
+                    away_time = datetime.now() - client['last_activity']
+                    with db.cursor() as tmp_c:
+                        tmp_c.execute("SELECT operation,command_id FROM commands WHERE hostname='{}' AND status='STARTED'".format(client['hostname']))
+                        command = tmp_c.fetchone()
+                        if command is None:
+                            LOGGER.error("{} is in BUSY state with no STARTED commands in queue. Away time='{}' - Setting UNKNOWN".format(client['hostname'], away_time))
+                            tmp_c.execute("UPDATE clients SET status='UNKNOWN' WHERE hostname='{}'".format(client['hostname']))
+                        else:
+                            LOGGER.info("{} is in a BUSY state working on CID={} since '{}'".format(client['hostname'], command['command_id'], client['last_activity']))
+                elif client['status'] != "UNKNOWN" and client['status'] != "UNINSTALLED" and client['status'] != "OFFLINE":
                     away_time = datetime.now() - client['last_activity']
                     LOGGER.debug("{} hasn't fetched in '{}'".format(client['hostname'], away_time))
                     if away_time > timedelta(days=offline_timeout):
