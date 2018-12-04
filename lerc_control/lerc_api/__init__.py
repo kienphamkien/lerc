@@ -56,12 +56,13 @@ def load_config(profile='default', required_keys=[]):
 
     if isinstance(required_keys, list) and required_keys:
         for key in required_keys:
-            missing = False
+            found = False
             if not config.has_option(profile, key):
                 for section in config.sections():
-                    if not config.has_option(section, key):
-                        missing = True
-            if missing:
+                    if config.has_option(section, key):
+                        found = True
+                        break
+            if not found:
                 logger.error("Missing required config item: {}".format(key))
 
     return config
@@ -109,7 +110,7 @@ class lerc_session():
         self.host = host
         self.logger.debug("attaching to host '{}'..".format(host))
 
-    def __init__(self, profile='default', server=None, host=None, chunk_size=4096):
+    def __init__(self, profile='default', server=None, host=None, client_id=None, chunk_size=4096):
         self.config = load_config(profile)
         self.profile = profile
         if server:
@@ -132,6 +133,7 @@ class lerc_session():
                 if 'https_proxy' in os.environ:
                     del os.environ['https_proxy']
         self.attach_host(host)
+        self.client_id = client_id
         self.command = None
         self.error = None
         self.contained = False

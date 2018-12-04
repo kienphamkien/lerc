@@ -1,4 +1,5 @@
 
+import os
 import time
 import subprocess
 import shlex
@@ -7,6 +8,57 @@ import logging
 import lerc_api
 
 logger = logging.getLogger("lerc_control."+__name__)
+
+# Get the working lerc_control directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def get_directory(hostname, dir_path, profile='default'):
+
+    config = lerc_api.load_config(required_keys=['7za_path', '7za_dir_cmd'])
+    section = profile + "_collect"
+    _7za_path = config[section]['7za_path']
+    _7za_cmd = config[section]['7za_dir_cmd']
+    default_client_dir = config['default']['client_working_dir']
+
+    if not os.path.exists(_7za_path):
+        if _7za_path[0] == '/':
+            _7za_path = BASE_DIR + _7za_path
+        else:
+            _7za_path = BASE_DIR + '/' + _7za_path
+
+    if not os.path.exists(_7za_path):
+        logger.error("'{}' does not exist".format(_7za_path))
+        return False
+
+    ls = lerc_api.lerc_session()
+    client = ls.check_host(host=hostname)
+    if not client:
+        logger.info("No LERC with '{}' for hostname".format(hostname))
+        return False
+
+    commands = []
+    cmd = ls.Download(_7za_path)
+    logger.info("Issued CID={} to download 7za.exe.".format(cmd['command_id']))
+    commands.append(cmd)
+
+    cmd = ls.Run(_7za_cmd.format(hostname+'_dirOfInterest' , dir_path))
+    logger.info("Issued CID={} to run 7za on '{}'".format(cmd['command_id'], dir_path))
+    commands.append(cmd)
+
+    outputfile = default_client_dir + '{}_dirOfInterest.7z'.format(hostname)
+    upCmd = ls.Upload(outputfile)
+    logger.info("Issued CID={} to upload {}_dirOfInterest.7z".format(upCmd['command_id'], hostname))
+    logger.info("Waiting for the upload command to reach completion ... ")
+    commands.append(ls.wait_for_command(upCmd))
+
+    cmd = ls.Run('Del "{}" && Del 7za.exe'.format(outputfile))
+    logger.info("Issued CID={} to to delete '{}' and 7za.exe".format(cmd['command_id'], hostname))
+    commands.append(cmd)
+
+    logger.info("Getting result from the control server..".format(hostname))
+    if ls.get_results(cid=upCmd['command_id'], file_path='{}_dirOfInterest.7z'.format(hostname)):
+        logger.info("Wrote {}_dirOfInterest.7z".format(hostname))
+    return commands
 
 
 def full_collection(hostname, profile='default'):

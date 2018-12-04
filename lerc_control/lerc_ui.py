@@ -59,6 +59,7 @@ if __name__ == "__main__":
 
     # response functions
     parser_collect = subparsers.add_parser('collect', help="Default (no argumantes): perform a full lr.exe collection")
+    parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
 
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
     parser_contain.add_argument('-on', action='store_true', help="turn on containment")
@@ -81,6 +82,8 @@ if __name__ == "__main__":
     # create a lerc session object and make sure host exists by checking for it
     ls = lerc_api.lerc_session() 
     client = ls.check_host(host=host)
+
+    # Auto-Deployment Jazz
     bad_status = False
     if client:
         if 'status' in client and client['status'] == 'UNINSTALLED' or client['status'] == 'UNKNOWN':
@@ -122,11 +125,15 @@ if __name__ == "__main__":
             logger.error("Didn't find a sensor in CarbonBlack by this hostname")
             sys.exit(0)
  
+    # collections
     profile=args.environment if args.environment else 'default'
     if args.instruction == 'collect':
         if not args.debug:
             logging.getLogger('lerc_api').setLevel(logging.WARNING)
-        collect.full_collection(args.hostname, profile=profile)
+        if args.directory:
+            commands = collect.get_directory(host, args.directory)
+        else:
+            collect.full_collection(args.hostname, profile=profile)
         sys.exit(0)
 
     if args.instruction == 'script':
