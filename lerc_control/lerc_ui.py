@@ -23,6 +23,8 @@ logging.getLogger('requests').setLevel(logging.WARNING)
 logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 logging.getLogger('lerc_api').setLevel(logging.INFO)
 logging.getLogger('lerc_control').setLevel(logging.WARNING)
+logging.getLogger('lerc_control.scripted').setLevel(logging.INFO)
+logging.getLogger('lerc_control.collect').setLevel(logging.INFO)
 
 logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
@@ -35,15 +37,16 @@ if __name__ == "__main__":
     parser.add_argument('-q', '--queue', action="store_true", help="return the entire command queue (despite status)")
     parser.add_argument('-e', '--environment', action="store", help="specify an environment to work with. Default='default'")
     parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG")
-    #parser.add_argument('-c', '--check', help="check on a specific command id")
+    parser.add_argument('-c', '--check', action="store", help="check on a specific command id")
+    parser.add_argument('-r', '--resume', action='store', help="resume a pending command id") 
+    parser.add_argument('-g', '--get', action='store', help="get results for a command id")
 
     subparsers = parser.add_subparsers(dest='instruction') #title='subcommands', help='additional help')
 
+    # Initiate new LERC commands
     parser_run = subparsers.add_parser('run', help="Run a shell command on the host. BE CAREFUL!")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
     parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
-
-    parser_collect = subparsers.add_parser('collect', help="Default (no argumantes): perform a full lr.exe collection")
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
     parser_upload.add_argument('file_path', help='the file path on the client')
@@ -54,14 +57,8 @@ if __name__ == "__main__":
 
     parser_quit = subparsers.add_parser('quit', help="tell the client to uninstall itself")
 
-    parser_check = subparsers.add_parser('check', help="check on a specific command id")
-    parser_check.add_argument('cid', help="the command id")
-
-    parser_resume = subparsers.add_parser('resume', help="resume a pending command id")
-    parser_resume.add_argument('cid', help="the command id")
-
-    parser_get = subparsers.add_parser('get', help="get results for a command id")
-    parser_get.add_argument('cid', help="the command id")
+    # response functions
+    parser_collect = subparsers.add_parser('collect', help="Default (no argumantes): perform a full lr.exe collection")
 
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
     parser_contain.add_argument('-on', action='store_true', help="turn on containment")
@@ -81,8 +78,7 @@ if __name__ == "__main__":
         coloredlogs.install(level='DEBUG', logger=logger)
 
     host = args.hostname
-    # create a lerc session object and make sure the host exists
-    # by checking for it and getting it's dict representation
+    # create a lerc session object and make sure host exists by checking for it
     ls = lerc_api.lerc_session() 
     client = ls.check_host(host=host)
     bad_status = False
@@ -131,11 +127,9 @@ if __name__ == "__main__":
         if not args.debug:
             logging.getLogger('lerc_api').setLevel(logging.WARNING)
         collect.full_collection(args.hostname, profile=profile)
-        #pprint.pprint(commands)
         sys.exit(0)
 
     if args.instruction == 'script':
-        #logging.getLogger('lerc_api').setLevel(logging.WARNING)
         config = lerc_api.load_config()
         if args.list_scripts:
             if not config.has_section('scripts'):
@@ -191,18 +185,18 @@ if __name__ == "__main__":
 
     elif args.instruction == 'quit':
         result = ls.Quit()
-    elif args.instruction == 'check':
-        command = ls.check_command(args.cid)
+    elif args.check:
+        command = ls.check_command(args.check)
         if command:
             pprint.pprint(command)
         sys.exit()
-    elif args.instruction == 'get':
-        command = ls.get_results(args.cid, chunk_size=16384)
+    elif args.get:
+        command = ls.get_results(args.get, chunk_size=16384)
         if command:
             pprint.pprint(command)
         sys.exit()
-    elif args.instruction == 'resume':
-        command = ls.check_command(args.cid)
+    elif args.resume:
+        command = ls.check_command(args.resume)
         command = ls.wait_for_command(command)
         if command:
             pprint.pprint(command)
