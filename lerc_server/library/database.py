@@ -25,6 +25,7 @@ class clientStatusTypes(enum.Enum):
     OFFLINE = 'OFFLINE'
     UNKNOWN = 'UNKNOWN'
     UNINSTALLED = 'UNINSTALLED'
+    BUSY = 'BUSY'
 
 class Commands(db.Model):
     command_id = db.Column(db.Integer, primary_key = True)
