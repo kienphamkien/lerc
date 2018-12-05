@@ -54,14 +54,14 @@ def load_config(profile='default', required_keys=[]):
         logger.critical("No section named '{}' in configuration files : {}".format(profile, config_paths))
         raise
 
+    # Just make sure the keys show up somewhere in the config - Not a fool-proof check
     if isinstance(required_keys, list) and required_keys:
         for key in required_keys:
             found = False
-            if not config.has_option(profile, key):
-                for section in config.sections():
-                    if config.has_option(section, key):
-                        found = True
-                        break
+            for section in config.sections():
+                if config.has_option(section, key):
+                    found = True
+                    break
             if not found:
                 logger.error("Missing required config item: {}".format(key))
 
@@ -111,7 +111,7 @@ class lerc_session():
         self.logger.debug("attaching to host '{}'..".format(host))
 
     def __init__(self, profile='default', server=None, host=None, client_id=None, chunk_size=4096):
-        self.config = load_config(profile)
+        self.config = load_config(profile, required_keys=['server', 'server_ca_cert', 'client_cert', 'client_key'])
         self.profile = profile
         if server:
             self.server = server
