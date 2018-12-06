@@ -187,6 +187,7 @@ namespace lercLib
                     request.ClientCertificates.Add(clientCertificate);
                     request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
                     request.Method = "GET";
+                    request.Proxy = new WebProxy();
                     ClearServicePointCache(request.ServicePoint);
 
                     HttpWebResponse response = (HttpWebResponse)request.GetResponse();
@@ -232,6 +233,7 @@ namespace lercLib
                 request.ClientCertificates.Add(clientCertificate);
                 request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
                 request.Method = "POST";
+                request.Proxy = new WebProxy();
                 ClearServicePointCache(request.ServicePoint);
 
                 using (StreamWriter requestStream = new StreamWriter(request.GetRequestStream()))
@@ -303,6 +305,7 @@ namespace lercLib
                             request.ClientCertificates.Add(clientCertificate);
                             request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
                             request.Method = "POST";
+                            request.Proxy = new WebProxy();
                             request.AllowWriteStreamBuffering = false;
                             request.SendChunked = true;
                             ClearServicePointCache(request.ServicePoint);
@@ -333,6 +336,7 @@ namespace lercLib
             request.ClientCertificates.Add(clientCertificate);
             request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
             request.Method = "POST";
+            request.Proxy = new WebProxy();
             request.AllowWriteStreamBuffering = false;
             request.SendChunked = true;
             ClearServicePointCache(request.ServicePoint);
@@ -359,6 +363,7 @@ namespace lercLib
                 request.ClientCertificates.Add(clientCertificate);
                 request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
                 request.Method = "POST";
+                request.Proxy = new WebProxy();
                 request.AllowWriteStreamBuffering = false;
                 request.SendChunked = true;
                 ClearServicePointCache(request.ServicePoint);
@@ -396,6 +401,7 @@ namespace lercLib
                 request.ClientCertificates.Add(clientCertificate);
                 request.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(ValidateServerCertificate);
                 request.Method = "GET";
+                request.Proxy = new WebProxy();
                 request.AllowReadStreamBuffering = false;
                 ClearServicePointCache(request.ServicePoint);
 
