@@ -122,6 +122,7 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
                                                                             wait_timeout=60, wait_for_output=True).decode('utf-8')))
 
         logger.info("~ dropping current Live Endpoint Response Client msi onto {}".format(hostname))
+        logger.debug("Dropping this msi : {}".format(lerc_installer_path))
         filedata = None
         with open(lerc_installer_path, 'rb') as f:
             filedata = f.read()

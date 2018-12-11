@@ -66,9 +66,9 @@ if __name__ == "__main__":
     parser_contain.add_argument('-off', action='store_true', help="turn off containment")
     parser_contain.add_argument('-s', '--status', action='store_true', help="Get containment status of host")
 
-    parser_script = subparsers.add_parser('script', help="run a scripted routine on thie lerc.")
-    parser_script.add_argument('-l', '--list-scripts', action='store_true', help="list built-in scripts availble to lerc_ui")
-    parser_script.add_argument('-s', '--script-name', help="provide the name of a build in script to run")
+    parser_script = subparsers.add_parser('script', help="run a scripted routine on this lerc.")
+    parser_script.add_argument('-l', '--list-scripts', action='store_true', help="list scripts availble to lerc_ui")
+    parser_script.add_argument('-s', '--script-name', help="provide the name of a script to run")
     parser_script.add_argument('-f', '--file-path', help="the path to a custom script you want to execute")
 
     args = parser.parse_args()
@@ -80,14 +80,20 @@ if __name__ == "__main__":
 
     host = args.hostname
     # create a lerc session object and make sure host exists by checking for it
-    ls = lerc_api.lerc_session() 
-    client = ls.check_host(host=host)
+    ls = lerc_api.lerc_session()
+    client = ls.get_host(hostname=host)
+    if isinstance(client, list):
+        logger.critical("More than one result. Not handled yet..")
+        for c in client:
+            print(c)
+            print()
+        sys.exit(1) 
 
     # Auto-Deployment Jazz
     bad_status = False
     if client:
-        if 'status' in client and client['status'] == 'UNINSTALLED' or client['status'] == 'UNKNOWN':
-            logger.info("Non-working client status : {}".format(client['status']))
+        if client.status == 'UNINSTALLED' or client.status == 'UNKNOWN':
+            logger.info("Non-working client status : {}".format(client.status))
             bad_status = True
 
     if not client or bad_status:
@@ -117,9 +123,9 @@ if __name__ == "__main__":
         elif sensors:
             logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.INFO)
             sensor = sensors[0][1]
-            config = lerc_api.load_config(required_keys=['lerc_install_cmd', 'client_installer'])
+            config = lerc_api.check_config(config, required_keys=['lerc_install_cmd', 'client_installer'])
             result = deploy_lerc(sensor, config[sensors[0][0]]['lerc_install_cmd'], lerc_installer_path=config['default']['client_installer'])
-            if result:
+            if result: # modify deploy_lerc to use new client objects
                 logger.info("Successfully deployed lerc to this host: {}".format(pprint.pprint(result, indent=4)))
         else:
             logger.error("Didn't find a sensor in CarbonBlack by this hostname")
@@ -137,7 +143,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.instruction == 'script':
-        config = lerc_api.load_config()
+        #config = lerc_api.load_config()
+        config = ls.get_config
         if args.list_scripts:
             if not config.has_section('scripts'):
                 print("\nNo pre-existing scripts have been made availble.")
@@ -163,19 +170,19 @@ if __name__ == "__main__":
             logger.info("No argument was specified for the script command. Exiting.")
             sys.exit(0)
 
-    result = None
+    # Else, see if we're running a command directly
+    cmd = None
     if args.instruction == 'run':
         if args.async:
-            print(args.async)
-            result = ls.Run(args.command, async=args.async)
+            cmd = client.Run(args.command, async=args.async)
         else:
-            result = ls.Run(args.command)
+            cmd = client.Run(args.command)
 
     elif args.instruction == 'contain':
         if args.on:
-            ls.contain()
+            client.contain()
         elif args.off:
-            ls.release_containment()
+            client.release_containment()
         elif args.status:
             print("Containment status check not yet implemented.")
 
@@ -185,22 +192,22 @@ if __name__ == "__main__":
         file_name = args.file_path[args.file_path.rfind('/')+1:]
         if args.local_file is None:
             args.local_file = file_name
-        result = ls.Download(file_name, client_file_path=args.local_file, analyst_file_path=analyst_file_path)
+        cmd = client.Download(file_name, client_file_path=args.local_file, analyst_file_path=analyst_file_path)
 
     elif args.instruction == 'upload':
-        result = ls.Upload(args.file_path)
+        cmd = client.Upload(args.file_path)
 
     elif args.instruction == 'quit':
-        result = ls.Quit()
+        cmd = client.Quit()
     elif args.check:
-        command = ls.check_command(args.check)
-        if command:
-            pprint.pprint(command)
+        command = ls.get_command(args.check)
+        print(command)
         sys.exit()
     elif args.get:
-        command = ls.get_results(args.get, chunk_size=16384)
+        command = ls.get_command(args.get)
         if command:
-            pprint.pprint(command)
+            command.get_results(chunk_size=16384)
+            print(command)
         sys.exit()
     elif args.resume:
         command = ls.check_command(args.resume)
@@ -220,17 +227,18 @@ if __name__ == "__main__":
         print()
         sys.exit()
     else:
-        client = ls.check_host()
-        pprint.pprint(client)
-        print()
+        #client = ls.check_host()
+        #pprint.pprint(client)
+        print(client)
         sys.exit()
 
-    if not result:
+    if not cmd:
         sys.exit(1)
 
     start_time = time.time() 
-    command = ls.check_command()
-    command = ls.wait_for_command(command)
+    #command = ls.check_command()
+    #command = ls.wait_for_command(command)
+    cmd.wait_for_completion()
 
     if command['status'] == 'COMPLETE':
         if command['operation'] == 'UPLOAD':

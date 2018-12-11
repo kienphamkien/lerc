@@ -3,6 +3,7 @@ import os
 import time
 import subprocess
 import shlex
+import pprint
 import logging
 
 import lerc_api
@@ -125,7 +126,7 @@ def full_collection(hostname, profile='default'):
                     position += len(results)
                     print(results.decode('utf-8'))
             time.sleep(1)
-        if collect_command['status'] == 'COMPLETE':
+        elif collect_command['status'] == 'COMPLETE':
             if position < collect_command['filesize']:
                 results = ls.get_results(cid=collect_command['command_id'], return_content=True, position=position)
                 if len(results) > 0:
@@ -133,6 +134,9 @@ def full_collection(hostname, profile='default'):
                     print(results.decode('utf-8'))
             elif position >= collect_command['filesize']:
                 break
+        elif collect_command['status'] == 'UNKNOWN' or collect_command['status'] == 'ERROR':
+            logger.error("Collect command went to {} state : {}".format(collect_command['status'], pprint.pprint(collect_command)))
+            return False
         time.sleep(5)
     logger.info("Waiting for '{}' upload to complete.".format(output_filename))
     upload_command = ls.wait_for_command(upload_command)
