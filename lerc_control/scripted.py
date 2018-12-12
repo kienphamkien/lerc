@@ -37,24 +37,21 @@ def operation_missing_required_keys(config, section, KEYS):
             return True
     return False
 
-def get_cmd_options(script, command):
-    wait_for_completion = get_results = False
-    if 'wait_for_completion' in script[command]:
-        wait_for_completion = script[command].getboolean('wait_for_completion')
-    if 'get_results' in script[command]:
-        get_results = script[command].getboolean('get_results')
-    return wait_for_completion, get_results
-
-def execute_script(hostname, script_path):
+def execute_script(lerc, script_path):
     """Execute a script on this host.
 
-    :param str hostname: The hostname of a lerc.
+    :param lerc_api.Client lerc: A lerc_api.Client object.
     :param str script_path: the path to the script
     :return: a dictionary of the commands issued
     """
 
-    config = lerc_api.load_config()
-    default_client_dir = config['default']['client_working_dir']
+    if not isinstance(lerc, lerc_api.Client):
+        logger.error("Argument is of type:{} instead of type lerc_api.Client".format(type(lerc)))
+        return False
+
+    config = lerc._ls.get_config
+    profile = lerc._ls.profile
+    default_client_dir = config[profile]['client_working_dir']
 
     script = ConfigParser()
     if not os.path.exists(script_path):
@@ -66,9 +63,6 @@ def execute_script(hostname, script_path):
  
     if script_missing_required_keys(script, REQUIRED_CMD_KEYS):
         return False
-
-    ls = lerc_api.lerc_session()
-    ls.check_host(host=hostname)
 
     command_history = {}
 
@@ -101,11 +95,11 @@ def execute_script(hostname, script_path):
             if 'async_run' in script[command]:
                 async_run = script[command].getboolean('async_run')
             run_string = script[command]['command']
-            cmd = ls.Run(run_string, async=async_run)
+            cmd = lerc.Run(run_string, async=async_run)
             command_history[command] = cmd
-            command_history[command]['get_results'] = get_results
-            command_history[command]['write_results_path'] = write_results_path
-            logger.info("Issued : Run - CID={} - {}".format(cmd['command_id'], run_string))
+            command_history[command].get_the_results = get_results
+            command_history[command].write_results_path = write_results_path
+            logger.info("Issued : Run - CID={} - {}".format(cmd.id, run_string))
         elif op == 'DOWNLOAD':
             client_file_path = None
             if 'client_file_path' in script[command]:
@@ -120,36 +114,31 @@ def execute_script(hostname, script_path):
                 if not os.path.exists(file_path):
                     logger.error("Not found: '{}' OR '{}'".format(old_fp, file_path))
                     return False
-            cmd = ls.Download(file_path, client_file_path=client_file_path)
+            cmd = lerc.Download(file_path, client_file_path=client_file_path)
             command_history[command] = cmd
-            logger.info("Issued : Download - CID={} - {}".format(cmd['command_id'], file_path))
+            logger.info("Issued : Download - CID={} - {}".format(cmd.id, file_path))
         elif op == 'UPLOAD':
             path = script[command]['path']
             # if the script doesn't specify the full path, add default client working dir
             if '\\' not in path:
                 path = default_client_dir + path
-            write_results_path = None
-            if 'write_results_path' in script[command]:
-                write_results_path = script[command]['write_results_path']
-            cmd = ls.Upload(path)
+            cmd = lerc.Upload(path)
             command_history[command] = cmd
-            command_history[command]['get_results'] = get_results
-            command_history[command]['write_results_path'] = write_results_path
-            logger.info("Issued : Upload - CID={} - {}".format(cmd['command_id'], path))
+            command_history[command].get_the_results = get_results
+            command_history[command].write_results_path = write_results_path
+            logger.info("Issued : Upload - CID={} - {}".format(cmd.id, path))
         elif op == 'QUIT':
-            cmd = ls.Quit()
+            cmd = lerc.Quit()
             command_history[command] = cmd
-            logger.info("Issued : Quit - CID={}".format(cmd['command_id'], path))
+            logger.info("Issued : Quit - CID={}".format(cmd.id, path))
 
     logger.info("Checking to see if results need to be obtained ...")
     for command in command_history:
         cmd = command_history[command]
-        if 'get_results' in cmd and cmd['get_results']:
-            logger.info("Waiting for command {} to complete..".format(cmd['command_id']))
-            command_history[command] = ls.wait_for_command(cmd)
-            if 'write_results_path' not in cmd:
-                raise Exception("Someone changed something.. write_results_path should be define, even if None")
-            logger.info("Getting the results for command {}".format(cmd['command_id'])) 
-            ls.get_results(cid=cmd['command_id'], file_path=cmd['write_results_path'])
+        if hasattr(cmd, 'get_the_results') and cmd.get_the_results:
+            logger.info("Waiting for command {} to complete..".format(cmd.id))
+            cmd.wait_for_completion()
+            logger.info("Getting the results for command {}".format(cmd.id))
+            cmd.get_results(file_path=cmd.write_results_path)
 
     return command_history
