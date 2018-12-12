@@ -34,7 +34,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="User interface to the LERC control server")
     #parser.add_argument('-h', '--hostname', help="the host you'd like to work with")
-    parser.add_argument('-q', '--queue', action="store_true", help="return the entire command queue (despite status)")
     parser.add_argument('-e', '--environment', action="store", help="specify an environment to work with. Default='default'")
     parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG")
     parser.add_argument('-c', '--check', action="store", help="check on a specific command id")
@@ -109,10 +108,29 @@ if __name__ == "__main__":
             print() 
         sys.exit()
 
-    host = args.hostname
-    # create a lerc session object and make sure host exists by checking for it
+    # a local lerc_session will be needed to go any further
     ls = lerc_api.lerc_session()
-    client = ls.get_host(hostname=host)
+
+    # root options
+    if args.check:
+        command = ls.get_command(args.check)
+        print(command)
+        sys.exit()
+    elif args.get:
+        command = ls.get_command(args.get)
+        if command:
+            command.get_results(chunk_size=16384)
+            print(command)
+        sys.exit()
+    elif args.resume:
+        command = ls.get_command(args.resume)
+        command.wait_for_completion()
+        if command:
+            print(command)
+        sys.exit()
+
+    # if we're here, then an instructions been specified and the args.hostname is a thing
+    client = ls.get_host(args.hostname)
     if isinstance(client, list):
         logger.critical("More than one result. Not handled yet..")
         for c in client:
@@ -158,7 +176,7 @@ if __name__ == "__main__":
             result = deploy_lerc(sensor, config[sensors[0][0]]['lerc_install_cmd'], lerc_installer_path=config['default']['client_installer'])
             if result: # modify deploy_lerc to use new client objects
                 logger.info("Successfully deployed lerc to this host: {}".format(args.hostname))
-                client = ls.get_host(host)
+                client = ls.get_host(args.hostname)
         else:
             logger.error("Didn't find a sensor in CarbonBlack by this hostname")
             sys.exit(0)
@@ -247,17 +265,6 @@ if __name__ == "__main__":
         command.wait_for_completion()
         if command:
             print(command)
-        sys.exit()
-    elif args.queue:
-        result = ls.get_command_queue()
-        if 'error' in result:
-            logger.error('\n{}'.format(pprint.pformat(result)))
-            sys.exit()
-        if not result:
-            print("This host doesn't have any command history.")
-        for command in result:
-            pprint.pprint(command)
-        print()
         sys.exit()
     else:
         print(client)

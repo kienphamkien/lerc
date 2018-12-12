@@ -84,8 +84,10 @@ def load_config(profile='default', required_keys=[]):
 CONFIG = load_config()
 QUERY_FIELDS = ['cmd_id', 'hostname', 'operation', 'cmd_status', 'client_id', 'client_status', 'version', 'company_id', 'company']
 
-
 def parse_lerc_server_query(query_str):
+    """This function converts a string from field:value pairs into **args that lerc_session.query can recognize.
+    """
+    logger = logging.getLogger(__name__+".parse_lerc_server_query")
     query_parts = query_str.split()
     args = {}
     for part in query_parts:
@@ -95,7 +97,7 @@ def parse_lerc_server_query(query_str):
             part = part[1:]
         field = part[:part.find(':')]
         if field not in QUERY_FIELDS:
-            print("{} is not a valid query filed. Valid fields: {}".format(field, QUERY_FIELDS))
+            logger.error("{} is not a valid query filed. Valid fields: {}".format(field, QUERY_FIELDS))
             return False
         value = part[part.find(':')+1:]
         if negated:
@@ -513,7 +515,8 @@ class Command():
         while True:
             self.refresh()
             tmp_client = self._ls.get_client(self.client_id)
-            if tmp_client.status != 'ONLINE' and tmp_client.status != 'BUSY':
+            #if tmp_client.status != 'ONLINE' and tmp_client.status != 'BUSY':
+            if not tmp_client.is_online and not tmp_client.is_busy:
                 self.logger.warn("This command's LERC ({} (ID:{})) has gone to a status of '{}'".format(self.hostname, self.client_id, tmp_client.status))
             if self.status == 'PENDING': # we wait
                 self.logger.info("Command {} PENDING. Checking again in 10 seconds..".format(self.id))
@@ -629,87 +632,6 @@ class lerc_session():
     def hostname(self):
         return self.host
 
-    ## BEGING move to Client class ###
-    def _issue_command(self, command):
-        # check the host, make the post
-        if not self.host:
-            self.logger.error("No host has been specified.")
-            return False
-        arguments = {'host': self.host}
-        headers={"content-type": "application/json"}
-        r = requests.post(self.server+'/command', cert=self.cert, headers=headers,
-                                        params=arguments, data=json.dumps(command))
-        if r.status_code != requests.codes.ok:
-            self.error = { 'status_code': r.status_code, 'message': "ERROR : {}".format(r.text) }
-            self.logger.error(self.error['message'])
-            return False
-        else: # record the command
-            result = r.json()
-            if 'command_id' in result:
-                self.logger.info("{} (CID: {})".format(result['message'], result['command_id']))
-                self.command = result
-                return result
-            else:
-                if 'error' not in result:
-                    raise Exception("Unexpected result: {}".format(result))
-                self.error = result['error']
-                self.logger.error(self.error)
-                return False
-
-    def Run(self, shell_command, async=False):
-        """Execute a shell command on the host.
-
-        :param str shell_command: The command to run on the host
-        :param bool async: (optional) ``False``: LERC client will stream any results and  wait until for completion. ``True``: Execute the command and return immediately.
-        """
-        command = { "operation":"run", "command": shell_command, "async": async }
-        self._issue_command(command)
-        return self.check_command()
-
-    def Download(self, server_file_path, client_file_path=None, analyst_file_path=None):
-        """Instruct a client to download a file. The file will be streamed to the server if the server doesn't have it yet. The streamed to the client.
-
-        :param str server_file_path: The path to the file that you want the client to download. If the supplied argument is the path to the file on the system this function is called, an attempt will be made to complete the analyst_file_path automatically.
-        :param str client_file_path: (optional) where the client should write the file, defaults server config default directory + the file name taken off of the server_file_path.
-        :param str analyst_file_path: (optional) path to the original file the analyst - This allows an analyst to resume a transfer between a lerc_session and the server. Neccessary for streaming the file to the server, if the server does not already have it
-        """
-        if analyst_file_path is None:
-            analyst_file_path = server_file_path
-
-        if '/' in server_file_path:
-            server_file_path = server_file_path[server_file_path.rfind('/')+1:]
-
-        command = { "operation":"download", "server_file_path":server_file_path,
-                    "client_file_path":client_file_path, "analyst_file_path":analyst_file_path}
-
-        self._issue_command(command)
-        return self.stream_file(analyst_file_path)
-
-    def Upload(self, path):
-        """Upload a file from client to server. The file will be streamed to the server and then streamed to the lerc_session.
-
-        :param str path: The path to the file, on the endpoint
-        """
-        command = { "operation":"upload", "client_file_path":path }
-        self._issue_command(command)
-        return self.check_command()
-
-    def Quit(self):
-        """The Quit command tells the LERC client to uninstall itself from the endpoint.
-        """
-        command = { "operation":"quit" }
-        self._issue_command(command)
-        return self.check_command()
-
-    def list_directory(self, dir_path):
-        """List the given directory, read the results into a list and return the list.
-        """
-        command = self.Run('cd "{}" && dir'.format(dir_path))
-        command = self.wait_for_command(command)
-        results = self.get_results(command['command_id'], return_content=True)
-        return results.decode('utf-8').splitlines()
-    ## END move to Client class ###
-
     def query(self, **kwargs):
         """Query the lerc server database. Very simple queries supported.
         Note: The 'rc' field stands for return commands. The server will only return command results if this value is set, else only clients.
@@ -775,95 +697,6 @@ class lerc_session():
         # save/update a copy of the current command
         self.command = r
         return self.command
-
-    ## Move to Command class ###
-    def get_results(self, cid=None, file_path=None, chunk_size=None, print_run=True, return_content=False, position=0):
-        """Get any results available for a command. If cid is None, any cid currently assigned to the lerc_session will be used.
-
-        :param int cid: (optional) The Id of a command to work with.
-        :param str file_path: (optional) The path to write the results. default: <hostname>_<cid>_filename to current dir.
-        :param int chunk_size: (optional) Specify the size of the chunks (bytes) to stream with the server
-        :param boolean print_run: (optionl default:True) If True, print Run command results to console
-        :param boolean return_content: (content) Do not write the results to a file, return the results as a byte string
-        :param int position: (optional) For manually specifing byte position
-        :return: If return_content==True, the raw content will be returned as a byte string, else the command is return on success. 
-        """
-        if not cid:
-            if not self.command:
-                self.logger.error("No command has been attached to this session")
-                return False
-            cid = self.command['command_id']
-
-        # make sure the command is up-to-date
-        self.check_command(cid)
-
-        if self.command['operation'] == 'DOWNLOAD' or self.command['operation'] == 'QUIT':
-            self.logger.info("No results to get for '{}' operations".format(self.command['operation']))
-            return self.command
-        elif self.command['filesize'] == 0:
-            self.logger.info("Command complete. No output to collect.")
-            return self.command
-
-        if chunk_size:
-            self.chunk_size = chunk_size
-
-        if not file_path:
-            file_path = self.command['server_file_path']
-        file_path = file_path[file_path.rfind('/')+1:] if file_path.startswith('data/') else file_path
-
-        # Do we already have some of the result file?
-        if os.path.exists(file_path):
-            statinfo = os.stat(file_path)
-            position = statinfo.st_size
-            self.logger.info("Already have {} out of {} bytes. Resuming download from server.."
-                             .format(position, self.command['filesize']))
-        else:
-            self.logger.debug("getting results for {}".format(cid))
-
-        arguments = {'position': position, 'cid': cid}
-        headers = {"Accept-Encoding": '0'}
-
-        if self.command['status'] != 'COMPLETE' and self.command['status'] != 'STARTED':
-            self.logger.warn("Any results for commands in state={} can not be reliably streamed.".format(self.command['status']))
-            return requests.get(self.server+'/command/download', cert=self.cert, params=arguments).json()
-
-        raw_bytes = None
-        total_chunks, remaining_bytes = divmod(self.command['filesize'] - position, self.chunk_size)
-        with closing(requests.get(self.server+'/command/download', cert=self.cert, params=arguments, headers=headers, stream=True)) as r:
-            try:
-                r.raw.decode_content = True
-                # are we returning the raw bytes?
-                if return_content:
-                    raw_bytes = b''
-                    for i in range(total_chunks):
-                        raw_bytes += r.raw.read(self.chunk_size)
-                    raw_bytes += r.raw.read(remaining_bytes)
-                    return raw_bytes
-                else:
-                    with open(file_path, 'ba') as f:
-                        for i in range(total_chunks):
-                            if self.command['operation'] == 'RUN' and print_run:
-                                print(r.raw.read(self.chunk_size).decode('utf-8'))
-                            f.write(r.raw.read(self.chunk_size))
-                        final_chunk = r.raw.read(remaining_bytes)
-                        if self.command['operation'] == 'RUN' and print_run:
-                            print(final_chunk.decode('utf-8'))
-                        f.write(final_chunk)
-                        f.close()
-            except Exception as e:
-                self.logger.error(str(e))
-                return False
-
-        # Did we get the entire result file?
-        filesize = os.stat(file_path).st_size
-        if self.command['filesize'] == filesize:
-            self.logger.info("Result file download complete. Wrote {}.".format(file_path))
-            return self.command
-        else:
-            self.logger.info("Data stream closed prematurely. Have {}/{} bytes. Trying to resume..".
-                              format(filesize, self.command['filesize']))
-            self.get_results()
-        return None
 
     def check_host(self, host=None):
         """Get the status of a client by hostname. Will attach the lerc_session to the hostname if the client exists.
@@ -948,146 +781,3 @@ class lerc_session():
             self.logger.error("{}".format(r))
             return r
 
-    ## Move to Command class
-    def stream_file(self, file_path, position=0):
-        # file_path - file to send
-        # position - position in file to send from (resume capable)
-        if not self.host:
-            self.error = "No host has been specified host."
-            self.logger.error(self.error)
-            return False
-
-        if not self.command:
-            self.error = "No command associated with this session"
-            self.logger.error(self.error)
-            return False
-        cid = self.command['command_id']
-
-        if not os.path.exists(file_path):
-            self.error = "{} does not exists. Aborting.".format(file_path)
-            self.logger.error(self.error)
-            return False
-
-        # get md5 of file
-        md5_hasher = md5()
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b''):
-                md5_hasher.update(chunk)
-        file_md5 = md5_hasher.hexdigest().lower()
-
-        statinfo = os.stat(file_path)        
-        arguments = {'host': self.host, 'cid': cid, 'filesize': statinfo.st_size, 'md5': file_md5}
-        def gen():
-            with open(file_path, 'rb') as f:
-                f.seek(position)
-                data = f.read(4096)
-                while data:
-                    yield data
-                    data = f.read(4096)
-                #break
-        r = requests.post(self.server+'/command/upload', cert=self.cert, params=arguments, data=gen()).json()
-        if 'error' in r:
-            self.logger.error("{}".format(r['error']))
-            return r
-        self.command = r
-        return self.command
-
-    ## Move to Commmand class
-    def wait_for_command(self, command):
-        """Wait for a command to complete by continously querying for its status to change to 'COMPLETE' with the server.
-
-        :param str command: A dictionary representation of a lerc command.
-        :return: Any results returned by a Run command or a file that was collected off of a client 
-        """
-        while command:
-            cid = command['command_id']
-            status = command['status']
-            if status == 'PENDING': # we wait
-                self.logger.info("Command {} PENDING. Checking again in 10 seconds..".format(cid))
-                time.sleep(10)
-                command = self.check_command(cid=cid)
-            elif status == 'PREPARING': # the command needs something from us (file)
-                if command['operation'] != "DOWNLOAD":
-                    self.error = "Command {} is PREPARING but we don't know what for.".format(cid)
-                    self.logger.error(self.error)
-                    return False
-                self.logger.info("Command {} PREPARING. Streaming file to server..".format(cid))
-                # function to stream file to server
-                if not command['analyst_file_path']:
-                    self.error = "Can't resume upload to server, analyst_file_path is not defined"
-                    self.logger.error(self.error)
-                    return False
-                command = self.stream_file(command['analyst_file_path'], command['file_position'])
-                if 'warn' in command:
-                    self.logger.warn(command['warn'])
-            elif status == 'STARTED':
-                self.logger.info("Command {} STARTED. Checking again in 10 seconds..".format(cid))
-                time.sleep(10)
-                command = self.check_command(cid=cid)
-            else:
-                self.logger.info("Command {} state: {}.".format(cid, command['status']))
-                return command
-
-    ## Move to Client class
-    def contain(self):
-        """Use the windows firewall to isolate a host. Everything will be blocked but lerc's access outbound. You must attach to a host before using contain.
-        This is implemented by dropping a bat file (a default is included in the lerc_control/tools dir) that will isolate a host with the windows firewall and only allow the lerc.exe client access through the firewall. The bat file will pause for ~60 seconds without prompting the user. Lerc is issued a run command to kill the bat file. If Lerc is able to fetch this run command from the control server, the bat file will be killed before the 60 seconds are up. If not, the bat file will undo all firewall changes.
-
-        :return: True on success
-        """
-
-        if self.contained:
-            return self.contained
-
-        self.logger.info("containing host..")
-        status = self.check_host()
-        if not status:
-            self.logger.error("Not attached to a host")
-            return False
-        safe_contain_bat_path = self.config[self.profile]['containment_bat']
-        contain_cmd = self.config[self.profile]['contain_cmd']
-
-        self.Download(safe_contain_bat_path)
-        containment_command = self.Run(contain_cmd.format(int(status['sleep_cycle'])+5), async=True)
-
-        # Dummy command to give the containment command enough time to execute before lerc kills it with wmic
-        self.Run("dir")
- 
-        bat_name = safe_contain_bat_path[safe_contain_bat_path.rfind('/')+1:]
-        kill_command = self.Run('wmic process where "CommandLine Like \'%{}%\'" Call Terminate'.format(bat_name))
-
-        # for spot checking
-        check_command = self.Run('netsh advfirewall show allprofiles')
-
-        containment_command = self.wait_for_command(containment_command)
-        self.logger.info(pprint.pformat(containment_command))
-        self.logger.info("Host contained at: {}".format(datetime.now()))
-        
-        self.logger.info("Command {} should return before {} seconds have passed.".format(kill_command['command_id'], status['sleep_cycle']))
-        kill_command = self.wait_for_command(kill_command)
-        self.logger.info(pprint.pformat(kill_command))
-
-        self.logger.info("Getting firewall status for due diligence..")
-        check_command = self.wait_for_command(check_command)
-        self.get_results(file_path = "{}_{}_firewall_status.txt".format(self.host, check_command['command_id']), print_run=False)
-
-        self.contained = True
-        return self.contained
-
-    # Move to Client class
-    def release_containment(self):
-        """Release containment on client.
-
-        :return: True on success.
-        """
-        if self.host is None:
-            self.logger.error("Not attached to a host")
-            return False
-        self.Run("netsh advfirewall reset && netsh advfirewall show allprofiles")
-        self.wait_for_command(self.check_command())
-        self.logger.info("Host containment removed at: {}".format(datetime.now()))
-        self.logger.info("Getting firewall status for due diligence..")
-        cid = self.command['command_id']
-        self.get_results(file_path = "{}_{}_firewall_reset.txt".format(self.host, cid), print_run=False)
-        self.contained = False
-        return not self.contained
