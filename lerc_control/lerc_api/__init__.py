@@ -19,6 +19,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def check_config(config, required_keys):
     # Just make sure the keys show up somewhere in the config - Not a fool-proof check
+    at_least_one_missing = False
     if isinstance(required_keys, list) and required_keys:
         for key in required_keys:
             found = False
@@ -27,7 +28,10 @@ def check_config(config, required_keys):
                     found = True
                     break
             if not found:
+                at_least_one_missing = True
                 logger.error("Missing required config item: {}".format(key))
+    if at_least_one_missing:
+        return False
     return config
 
 
@@ -74,8 +78,30 @@ def load_config(profile='default', required_keys=[]):
 
     return config
 
-
+######################
+## lerc_api GLOBALS ##
+######################
 CONFIG = load_config()
+QUERY_FIELDS = ['cmd_id', 'hostname', 'operation', 'cmd_status', 'client_id', 'client_status', 'version', 'company_id', 'company']
+
+
+def parse_lerc_server_query(query_str):
+    query_parts = query_str.split()
+    args = {}
+    for part in query_parts:
+        negated = False
+        if part[0] == '-' or part[0] == '!':
+            negated = True
+            part = part[1:]
+        field = part[:part.find(':')]
+        if field not in QUERY_FIELDS:
+            print("{} is not a valid query filed. Valid fields: {}".format(field, QUERY_FIELDS))
+            return False
+        value = part[part.find(':')+1:]
+        if negated:
+            value = '-' + value
+        args[field] = value
+    return args
 
 
 class Client():
@@ -357,6 +383,7 @@ class Command():
         self.status = cmd_dict['status']
         self.file_position = cmd_dict['file_position']
         self.filesize = cmd_dict['filesize']
+        self.server_file_path = cmd_dict['server_file_path']
 
     def stream_file(self, file_path, position=0):
         # file_path - file to send
@@ -485,6 +512,9 @@ class Command():
         """
         while True:
             self.refresh()
+            tmp_client = self._ls.get_client(self.client_id)
+            if tmp_client.status != 'ONLINE' and tmp_client.status != 'BUSY':
+                self.logger.warn("This command's LERC ({} (ID:{})) has gone to a status of '{}'".format(self.hostname, self.client_id, tmp_client.status))
             if self.status == 'PENDING': # we wait
                 self.logger.info("Command {} PENDING. Checking again in 10 seconds..".format(self.id))
                 time.sleep(10)
@@ -680,33 +710,25 @@ class lerc_session():
         return results.decode('utf-8').splitlines()
     ## END move to Client class ###
 
-    def query(self, client_id=None, hostname=None, version=None, company=None, client_status=None, company_id=None, 
-              cmd_id=None, cmd_status=None, operation=None, return_commands=False):
+    def query(self, **kwargs):
+        """Query the lerc server database. Very simple queries supported.
+        Note: The 'rc' field stands for return commands. The server will only return command results if this value is set, else only clients.
+        """
+        valid_fields = ['rc', 'cmd_id', 'hostname', 'operation', 'cmd_status', 'client_id', 'client_status', 'version', 'company_id', 'company']
+        keys = kwargs.keys()
+        valid_keys = [key for key in keys if key in valid_fields]
+        if len(valid_keys) <= 0:
+            self.logger.warn("None of {} are valid query fileds.".format(keys))
+            return False
 
-        args = {}
-        if client_id:
-            args['client_id'] = client_id
-        if hostname:
-            args['hostname'] = hostname
-        if version:
-            args['version'] = version
-        if company:
-            args['company'] = company
-        if client_status:
-            args['client_status'] = client_status
-        if company_id:
-            args['company_id'] = company_id
-        if cmd_id:
-            args['cmd_id'] = cmd_id
-        if cmd_status:
-            args['cmd_status'] = cmd_status
-        if operation:
-            args['operation'] = operation
-        if return_commands:
-            args['rc'] = True
+        # If cmd keys were passed, assume it's ok to set the return commands arg
+        if 'rc' not in keys:
+            cmd_keys = [ key for key in valid_keys if 'cmd' in key]
+            if len(cmd_keys) > 0:
+                kwargs['rc'] = True
 
-        self.logger.debug("Searching for client(s) meeting : {}".format(args))
-        r = requests.get(self.server+'/query', cert=self.cert, params=args).json()
+        self.logger.debug("Searching for client(s) meeting : {}".format(kwargs))
+        r = requests.get(self.server+'/query', cert=self.cert, params=kwargs).json()
         results = {}
         if 'clients' in r:
             results['clients'] = [Client(c) for c in r['clients']]
@@ -716,7 +738,8 @@ class lerc_session():
         return r
 
     def get_command(self, cid):
-        r = self.query(cmd_id=cid, return_commands=True)
+        #r = self.query(cmd_id=cid, return_commands=True)
+        r = self.query(cmd_id=cid, rc=True)
         # querying by command id should always return a single command
         if 'commands' in r and len(r['commands']) == 1:
             return r['commands'][0]

@@ -33,7 +33,7 @@ coloredlogs.install(level='INFO', logger=logger)
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="User interface to the LERC control server")
-    parser.add_argument('hostname', help="the host you'd like to work with")
+    #parser.add_argument('-h', '--hostname', help="the host you'd like to work with")
     parser.add_argument('-q', '--queue', action="store_true", help="return the entire command queue (despite status)")
     parser.add_argument('-e', '--environment', action="store", help="specify an environment to work with. Default='default'")
     parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG")
@@ -43,30 +43,42 @@ if __name__ == "__main__":
 
     subparsers = parser.add_subparsers(dest='instruction') #title='subcommands', help='additional help')
 
+    # Query
+    parser_query = subparsers.add_parser('query', help="Query the LERC Server")
+    parser_query.add_argument('query', help="The search you want to run.")
+    parser_query.add_argument('-rc', '--return-commands', action='store_true', help="Return command results (even if no cmd fields specified)")
+ 
     # Initiate new LERC commands
     parser_run = subparsers.add_parser('run', help="Run a shell command on the host. BE CAREFUL!")
+    parser_run.add_argument('hostname', help="the host you'd like to work with")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
     parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
+    parser_upload.add_argument('hostname', help="the host you'd like to work with")
     parser_upload.add_argument('file_path', help='the file path on the client')
 
     parser_download = subparsers.add_parser('download', help="Download a file from the server to the client")
+    parser_download.add_argument('hostname', help="the host you'd like to work with")
     parser_download.add_argument('file_path', help='the path to the file on the server')
     parser_download.add_argument('-f', '--local-file', help='where the client should write the file')
 
     parser_quit = subparsers.add_parser('quit', help="tell the client to uninstall itself")
+    parser_quit.add_argument('hostname', help="the host you'd like to work with")
 
     # response functions
     parser_collect = subparsers.add_parser('collect', help="Default (no argumantes): perform a full lr.exe collection")
     parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
+    parser_collect.add_argument('hostname', help="the host you'd like to work with")
 
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
+    parser_contain.add_argument('hostname', help="the host you'd like to work with")
     parser_contain.add_argument('-on', action='store_true', help="turn on containment")
     parser_contain.add_argument('-off', action='store_true', help="turn off containment")
     parser_contain.add_argument('-s', '--status', action='store_true', help="Get containment status of host")
 
     parser_script = subparsers.add_parser('script', help="run a scripted routine on this lerc.")
+    parser_script.add_argument('hostname', help="the host you'd like to work with")
     parser_script.add_argument('-l', '--list-scripts', action='store_true', help="list scripts availble to lerc_ui")
     parser_script.add_argument('-s', '--script-name', help="provide the name of a script to run")
     parser_script.add_argument('-f', '--file-path', help="the path to a custom script you want to execute")
@@ -77,6 +89,25 @@ if __name__ == "__main__":
         logging.getLogger('lerc_api').setLevel(logging.DEBUG)
         logging.getLogger('lerc_control').setLevel(logging.DEBUG)
         coloredlogs.install(level='DEBUG', logger=logger)
+
+    if args.instruction == 'query':
+        query = lerc_api.parse_lerc_server_query(args.query)
+        ls = lerc_api.lerc_session()
+        if args.return_commands: 
+            query['rc'] = True
+        results = ls.query(**query)
+        clients = results['clients']
+        commands = results['commands']
+        print("\nClient Results:")
+        for lerc in clients:
+            print(lerc)
+        if commands:
+            commands = results['commands']
+            print("\nCommand Results:")
+            for cmd in commands:
+                print(cmd)
+            print() 
+        sys.exit()
 
     host = args.hostname
     # create a lerc session object and make sure host exists by checking for it
@@ -126,7 +157,8 @@ if __name__ == "__main__":
             config = lerc_api.check_config(config, required_keys=['lerc_install_cmd', 'client_installer'])
             result = deploy_lerc(sensor, config[sensors[0][0]]['lerc_install_cmd'], lerc_installer_path=config['default']['client_installer'])
             if result: # modify deploy_lerc to use new client objects
-                logger.info("Successfully deployed lerc to this host: {}".format(pprint.pprint(result, indent=4)))
+                logger.info("Successfully deployed lerc to this host: {}".format(args.hostname))
+                client = ls.get_host(host)
         else:
             logger.error("Didn't find a sensor in CarbonBlack by this hostname")
             sys.exit(0)
@@ -137,9 +169,9 @@ if __name__ == "__main__":
         if not args.debug:
             logging.getLogger('lerc_api').setLevel(logging.WARNING)
         if args.directory:
-            commands = collect.get_directory(host, args.directory)
+            commands = collect.get_directory(client, args.directory)
         else:
-            collect.full_collection(args.hostname, profile=profile)
+            collect.full_collection(client)
         sys.exit(0)
 
     if args.instruction == 'script':
@@ -156,15 +188,16 @@ if __name__ == "__main__":
             sys.exit(0)
         elif args.script_name:
             if not config.has_option('scripts', args.script_name):
-                print("{} is not a defined script".format(args.script_name))
+                logger.error("{} is not a defined script".format(args.script_name))
+                sys.exit(1)
             script_path = config['scripts'][args.script_name]
-            commands = execute_script(args.hostname, script_path)
+            commands = execute_script(client, script_path)
             sys.exit(0)
         elif args.file_path:
             if not os.path.exists(args.file_path):
                 logger.error("Could not find script file at '{}'".format(args.file_path))
                 sys.exit(1)
-            commands = execute_script(args.hostname, args.file_path)
+            commands = execute_script(client, args.file_path)
             sys.exit(0)
         else:
             logger.info("No argument was specified for the script command. Exiting.")
@@ -210,10 +243,10 @@ if __name__ == "__main__":
             print(command)
         sys.exit()
     elif args.resume:
-        command = ls.check_command(args.resume)
-        command = ls.wait_for_command(command)
+        command = ls.get_command(args.resume)
+        command.wait_for_completion()
         if command:
-            pprint.pprint(command)
+            print(command)
         sys.exit()
     elif args.queue:
         result = ls.get_command_queue()
@@ -227,8 +260,6 @@ if __name__ == "__main__":
         print()
         sys.exit()
     else:
-        #client = ls.check_host()
-        #pprint.pprint(client)
         print(client)
         sys.exit()
 
@@ -236,32 +267,12 @@ if __name__ == "__main__":
         sys.exit(1)
 
     start_time = time.time() 
-    #command = ls.check_command()
-    #command = ls.wait_for_command(command)
-    cmd.wait_for_completion()
-
-    if command['status'] == 'COMPLETE':
-        if command['operation'] == 'UPLOAD':
-            logger.info("Downloading file from server.")
-            ls.get_results()
-        elif command['operation'] == 'RUN':
-            logger.info("Downloading command results..")
-            ls.get_results()
-        else:
-            logger.info("{} command {} completed successfully".format(command['operation'], command['command_id']))
-
-    elif command['status'] == 'ERROR':
-        # get the error log file and write or print
-        if not 'error' in command:
-            logger.error("unexpected error condition without error message")
-            sys.exit(1)
-        logger.error("From client: \n{}".format(pprint.pformat(command)))
+    if not cmd.wait_for_completion():
+        logger.warning("{} (ID:{}) command went to a {} state. Exiting.".format(cmd.operation, cmd.id, cmd.status))
         sys.exit(1)
+    logger.info("{} command {} completed successfully".format(cmd.operation, cmd.id))
+    cmd.get_results()
 
-    elif command['status'] == 'UNKNOWN':
-        logger.error("The command is in an UNKNOWN state. An unknown error occured. Check the server logs")
-        sys.exit(1)
-    else:
-        print(pprint.pformat(command))
+    print(cmd)
 
     sys.exit()
