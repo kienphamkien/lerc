@@ -14,7 +14,7 @@ from flask import Flask, request, jsonify, stream_with_context, Response, make_r
 from werkzeug.serving import WSGIRequestHandler
 
 import library.clientInstructions as ci
-from library.database import db, operationTypes, cmdStatusTypes, clientStatusTypes, Commands, Clients
+from library.database import db, operationTypes, cmdStatusTypes, clientStatusTypes, Commands, Clients, Company_Mapping
 
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -467,25 +467,166 @@ class Error(Resource):
 
 
 # begin analyst management api resource definitions
+class Query(Resource):
+    CMD_FIELDS = ['cmd_id', 'hostname', 'operation', 'cmd_status', 'client_id']
+    CLIENT_FIELDS = ['client_id', 'hostname', 'client_status', 'version', 'company_id', 'company']
+    FIELDS = list(set(CMD_FIELDS + CLIENT_FIELDS))
+    def get(self):
+        """Get command and client information from the server with the following search fields.
+        This provides very basic 'AND' only queries. Fields are negated when a minus '-' sign is found in front of their values. 
+
+        :cmd_id: Command id (Will return a specifc command id)
+        :hostname: LERC hostname
+        :cmd_status: commands with this status. 
+        :client_id: LERC client id
+        :operation: Commands of this operation type
+        :client_status: Query for clients with a certain status
+        :version: Query for client versions
+        :company_id: Query for clients by company id
+        :company: Query for clients by company name
+        """
+        logger.info("Analyst performing command query : {}".format(request.args))
+        for key in request.args.keys():
+            if key in self.FIELDS:
+                break
+        else:
+            logger.error("Malformed command query request")
+            return make_response("Missing command query arguments", 400)
+
+        # Only perform queries if it makes sense to do so
+        perform_client_query = False
+        for key in request.args.keys():
+            if key in self.CLIENT_FIELDS:
+                perform_client_query = True
+                break
+        # A special rc argument must be set to inform 
+        # the server that command results are wanted
+        return_commands = request.args.get('rc')
+        if not perform_client_query and not return_commands:
+            logger.warn("Query will not return results : {}".format(request.args))
+            return make_response("Bad Query: return_commands not set and no client arguments supplied.", 400)
+        
+        cmd_id = request.args.get('cmd_id')
+        client_id = request.args.get('client_id')
+        hostname = request.args.get('hostname')
+        cmd_status = request.args.get('cmd_status')
+        op = request.args.get('operation')
+        client_status = request.args.get('status')
+        version = request.args.get('version')
+        company_id = request.args.get('company_id')
+        company = request.args.get('company')
+
+        results = {}
+        results['clients'] = []
+        results['commands'] = []
+
+        # client results
+        if perform_client_query:
+            if company:
+                negated = False
+                if company[0] == '-':
+                    negated = True
+                    company = company[1:]
+                    comp = Company_Mapping.query.filter_by(name=company).one()
+                if company_id and comp.id != int(company_id):
+                    logger.warn("Analyst query argument conflict : company_id and company name")
+                company_id = str(comp.id)
+                if negated:
+                    company_id = '-'+company_id
+
+            query = Clients.query
+            if client_id:
+                if client_id[0] == '-':
+                    query = query.filter(Clients.id!=client_id[1:])
+                else:
+                    query = query.filter(Clients.id==client_id)
+            if hostname:
+                if hostname[0] == '-':
+                    query = query.filter(Clients.hostname!=hostname[1:])
+                else:
+                    query = query.filter(Clients.hostname==hostname)
+            if client_status:
+                if client_status[0] == '-':
+                    query = query.filter(Clients.status!=client_status[1:])
+                else:
+                    query = query.filter(Clients.status==client_status)
+            if version:
+                if version[0] == '-':
+                    query = query.filter(Clients.version!=version[1:])
+                else:
+                    query = query.filter(Clients.version==version)
+            if company_id:
+                if company_id[0] == '-':
+                    query = query.filter(Clients.company_id!=company_id[1:])
+                else:
+                    query = query.filter(Clients.company_id==company_id)
+            clients = query.all()
+            results['clients'] = [client.to_dict() for client in clients]
+
+        # command results
+        if return_commands:
+            query = Commands.query
+            if cmd_id:
+                if cmd_id[0] == '-':
+                    query = query.filter(Commands.command_id!=cmd_id[1:])
+                else:
+                    query = query.filter(Commands.command_id==cmd_id)
+            if client_id:
+                if client_id[0] == '-':
+                    query = query.filter(Commands.client_id!=client_id[1:])
+                else:
+                    query = query.filter(Commands.client_id==client_id)
+            if hostname:
+                if hostname[0] == '-':
+                    query = query.filter(Commands.hostname!=hostname[1:])
+                else:
+                    query = query.filter(Commands.hostname==hostname)
+            if cmd_status:
+                if cmd_status[0] == '-':
+                    query = query.filter(Commands.status!=cmd_status[1:])
+                else:
+                    query = query.filter(Commands.status==cmd_status)
+            if op:
+                if op[0] == '-':
+                    query = query.filter(Commands.operation!=op[1:])
+                else:
+                    query = query.filter(Commands.operation==op)
+
+            commands = query.all()
+            results['commands'] = [command.to_dict() for command in commands]  
+
+        return results
+
+
 class Command(Resource):
     def post(self):
         # for posting new client commands and resources
-        def custom_response(status_code, message, command_id=None, position=None):
+        def custom_response(status_code, message, command_id=None, command=None):
             return {'status_code': status_code,
                     'message': message,
-                    'command_id': command_id}
+                    'command_id': command_id,
+                    'command': command}
 
-        if 'host' not in request.args:
+        client_id = request.args.get('id')
+        host = request.args.get('host')
+
+        if not host:
             logger.error("Malformed Error request")
             return make_response("Missing host argument", 400)
 
-        host = request.args['host']
         # make sure host exists in client tabel
         client = Clients.query.filter_by(hostname=host).first()
         if not client:
-            return {'status_code':'404',
-                    'message': "Not Found",
-                    'error': "No LERC client installed on a host by name '{}'.".format(host)}
+            if client_id:
+                client = Clients.query.filter_by(id=client_id).one()
+                if not client:
+                    return {'status_code':'404',
+                            'message': "Not Found",
+                            'error': "No LERC client with id '{}'.".format(client_id)}
+            else:
+                return {'status_code':'404',
+                        'message': "Not Found",
+                        'error': "No LERC client installed on a host by name '{}'.".format(host)}
 
         if 'detach' in request.args:
             # set the client's sleep time back to default
@@ -504,34 +645,34 @@ class Command(Resource):
         logger.info("Receiving Analyst command for {}".format(host))
 
         if command['operation'].upper() == operationTypes.RUN.name:
-            new_command = Commands(host, operationTypes.RUN, command=command['command'], async_run=command['async'])
+            new_command = Commands(host, operationTypes.RUN, client_id=client.id, command=command['command'], async_run=command['async'])
             db.session.add(new_command)
             db.session.commit()
             logger.info("RUN command id {} created for {}".format(new_command.command_id, host))
-            return custom_response(200, 'Created run command', command_id=new_command.command_id)
+            return custom_response(200, 'Created run command', command_id=new_command.command_id, command=new_command.to_dict())
         elif command['operation'].upper() == operationTypes.UPLOAD.name:
-            new_command = Commands(host, operationTypes.UPLOAD, client_file_path=command['client_file_path'])
+            new_command = Commands(host, operationTypes.UPLOAD, client_id=client.id, client_file_path=command['client_file_path'])
             db.session.add(new_command)
             db.session.commit()
             logger.info("UPLOAD command id {} created for {}".format(new_command.command_id, host))
-            return custom_response(200, 'created upload command', command_id=new_command.command_id)
+            return custom_response(200, 'created upload command', command_id=new_command.command_id, command=new_command.to_dict())
         elif command['operation'].upper() == operationTypes.DOWNLOAD.name:
             if command['client_file_path'] is None:
                 command['client_file_path'] = command['server_file_path']
-            new_command = Commands(host, operationTypes.DOWNLOAD,
+            new_command = Commands(host, operationTypes.DOWNLOAD, client_id=client.id,
                                    client_file_path=command['client_file_path'],
                                    analyst_file_path=command['analyst_file_path'],
                                    server_file_path=DATA_DIR+command['server_file_path'])
             db.session.add(new_command)
             db.session.commit()
             logger.info("DOWNLOAD command id {} created for {}".format(new_command.command_id, host))
-            return custom_response(200, 'created download command', command_id=new_command.command_id)
+            return custom_response(200, 'created download command', command_id=new_command.command_id, command=new_command.to_dict())
         elif command['operation'].upper() == operationTypes.QUIT.name:
-            new_command = Commands(host, operationTypes.QUIT)
+            new_command = Commands(host, operationTypes.QUIT, client_id=client.id)
             db.session.add(new_command)
             db.session.commit()
             logger.info("QUIT command id {} created for {}".format(new_command.command_id, host))
-            return custom_response(200, 'created quit command', command_id=new_command.command_id)
+            return custom_response(200, 'created quit command', command_id=new_command.command_id, command=new_command.to_dict())
 
         return None 
 
@@ -677,6 +818,19 @@ class AnalystDownload(Resource):
                         data = f.read(chunk_size)
             except Exception as e:
                 logging.error(str(e))
+                return False
+
+        logger.debug("Analyst download request : {}".format(request.args))
+        # Is the analyst making sure a result still exists?
+        result_file_check = request.args.get('result')
+        if result_file_check:
+            if os.path.exists(os.path.join(BASE_DIR, result_file_check)):
+                return {'message': "Results exist.", 'status_code': '200'}
+            else:
+                logger.warn("{} Does not exist".format(result_file_check))
+                return {'status_code': '404',
+                        'message': 'Not Found',
+                        'error': 'Results do not exist at {} - note: old results are purged routinely'.format(result_file_check)} 
 
         if 'cid' not in request.args or 'position' not in request.args:
             logger.warn("Malformed analyst download request")
@@ -689,6 +843,11 @@ class AnalystDownload(Resource):
             return {'status_code':'404',
                     'message': "Not Found",
                     'error': "Command id '{}' does not exist.".format(cid)}
+
+        #Make sure the result file exists - don't assume result_file_check happened correctly
+        if not os.path.exists(os.path.join(BASE_DIR, command.server_file_path)):
+            logger.warn("{} Does not exist".format(command.server_file_path))
+            return None
 
         command.file_position = int(request.args['position'])
         if command.status == cmdStatusTypes.STARTED and command.operation == operationTypes.RUN:
@@ -711,6 +870,7 @@ api.add_resource(Upload, '/upload')
 api.add_resource(Error, '/error')
 
 # add analyst api resources
+api.add_resource(Query, '/query')
 api.add_resource(Command, '/command')
 api.add_resource(AnalystUpload, '/command/upload')
 api.add_resource(AnalystDownload, '/command/download')
