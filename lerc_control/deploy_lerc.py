@@ -81,15 +81,15 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
     # check and see if the client's already installed
     client = None
     try:
-        client = ls.check_host(hostname)
+        client = ls.get_host(hostname)
     except:
         logger.warning("Can't reach the lerc control server")
 
     previously_installed = proceed_with_force = None
-    if client and 'error' not in client:
-        if client['status'] != 'UNINSTALLED':
+    if client:
+        if client.status != 'UNINSTALLED':
             errmsg = "lerc server reports the client is already installed on a system with this hostname:\n{}"
-            errmsg = errmsg.format(pprint.pformat(client))
+            errmsg = errmsg.format(client)
             logger.warning(errmsg)
             proceed_with_force = input("Proceed with fresh install? (y/n) [n] ") or 'n'
             proceed_with_force = True if proceed_with_force == 'y' else False
@@ -97,7 +97,7 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
                 return None
         else:
             previously_installed = True
-            logger.info("A client was previously uninstalled on this host: {}".format(pprint.pformat(client)))
+            logger.info("A client was previously uninstalled on this host: {}".format(client))
 
     lr_session = None
     try:
@@ -157,14 +157,13 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
 
     for i in range(attempts):
         try:
-            client = ls.check_host(hostname)
+            client = ls.get_host(hostname)
         except:
             logger.warning("Can't reach the lerc control server")
             break
         if client:
-            if 'error' not in client:
-                if client['status'] != 'UNINSTALLED':
-                    break
+            if client.status != 'UNINSTALLED':
+                break
         logger.info("~ giving the client {} more seconds".format(attempts*wait - wait*i))
         time.sleep(wait)
 
@@ -172,17 +171,13 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
         logger.warning("failed to auto-confirm install with lerc server.")
         _get_install_log()
         return None
-    elif 'error' in client:
-        logger.error("'{}' returned from server. Client hasn't checked in.".format(client['error']))
-        _get_install_log()
-        return False
-    elif previously_installed and client['status'] == 'UNINSTALLED':
+    elif previously_installed and client.status == 'UNINSTALLED':
         logger.warning("Failed to auto-confirm install. Client hasn't checked in.")
         _get_install_log()
         return False
 
     logger.info("Client installed on {} at '{}' - status={} - last check-in='{}'".format(hostname,
-                                 client['install_date'], client['status'], client['last_activity']))
+                                 client.install_date, client.status, client.last_activity))
     return client
 
 
@@ -267,7 +262,7 @@ def main(argv):
     result = deploy_lerc(sensor, config[args.company]['lerc_install_cmd'], lerc_installer_path=args.package)
     if result:
         print()
-        pprint.pprint(result, indent=4)
+        print(result)
         print()
 
 

@@ -29,6 +29,34 @@ logging.getLogger('lerc_control.collect').setLevel(logging.INFO)
 logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
 
+class TablePrinter(object):
+    "Print a list of dicts as a table"
+    def __init__(self, fmt, sep=' ', ul=None):
+        """        
+        @param fmt: list of tuple(heading, key, width)
+                        heading: str, column label
+                        key: dictionary key to value to print
+                        width: int, column width in chars
+        @param sep: string, separation between columns
+        @param ul: string, character to underline column label, or None for no underlining
+        """
+        super(TablePrinter,self).__init__()
+        self.fmt   = str(sep).join('{lb}{0}:{1}{rb}'.format(key, width, lb='{', rb='}') for heading,key,width in fmt)
+        self.head  = {key:heading for heading,key,width in fmt}
+        self.ul    = {key:str(ul)*width for heading,key,width in fmt} if ul else None
+        self.width = {key:width for heading,key,width in fmt}
+
+    def row(self, data):
+        return self.fmt.format(**{ k:str(data.get(k,''))[:w] for k,w in self.width.items() })
+
+    def __call__(self, dataList):
+        _r = self.row
+        res = [_r(data) for data in dataList]
+        res.insert(0, _r(self.head))
+        if self.ul:
+            res.insert(1, _r(self.ul))
+        return '\n'.join(res)
+
 
 if __name__ == "__main__":
 
@@ -48,7 +76,7 @@ if __name__ == "__main__":
     parser_query.add_argument('-rc', '--return-commands', action='store_true', help="Return command results (even if no cmd fields specified)")
  
     # Initiate new LERC commands
-    parser_run = subparsers.add_parser('run', help="Run a shell command on the host. BE CAREFUL!")
+    parser_run = subparsers.add_parser('run', help="Run a shell command on the host.")
     parser_run.add_argument('hostname', help="the host you'd like to work with")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
     parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
@@ -66,7 +94,7 @@ if __name__ == "__main__":
     parser_quit.add_argument('hostname', help="the host you'd like to work with")
 
     # response functions
-    parser_collect = subparsers.add_parser('collect', help="Default (no argumantes): perform a full lr.exe collection")
+    parser_collect = subparsers.add_parser('collect', help="Default (no arguments): perform a full lr.exe collection")
     parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
     parser_collect.add_argument('hostname', help="the host you'd like to work with")
 
@@ -95,16 +123,34 @@ if __name__ == "__main__":
         if args.return_commands: 
             query['rc'] = True
         results = ls.query(**query)
-        clients = results['clients']
-        commands = results['commands']
-        print("\nClient Results:")
-        for lerc in clients:
-            print(lerc)
+        clients = [ c.get_dict for c in results['clients']]
+        fmt = [ ('ID', 'id', 5),
+                ('Hostname', 'hostname', 20),
+                ('Status', 'status', 11),
+                ('Version', 'version', 8),
+                ('Sleep Cycle', 'sleep_cycle', 11),
+                ('Install Date', 'install_date', 20),
+                ('Last Activity', 'last_activity', 20),
+                ('Company ID', 'company_id', 10)]
+        print("\nClient Results:\n")
+        print( TablePrinter(fmt, sep='  ', ul='=')(clients))
+        print("Total Client Results:{}".format(len(clients)))
+        print()
+        commands = [ c.get_dict for c in results['commands']]
         if commands:
-            commands = results['commands']
-            print("\nCommand Results:")
-            for cmd in commands:
-                print(cmd)
+            fmt = [ ('ID', 'command_id', 9),
+                    ('Client ID', 'client_id', 9),
+                    ('Hostname', 'hostname', 20),
+                    ('Operation', 'operation', 11),
+                    ('Status', 'status', 9)]
+                  #  ('Version', 'version', 8),
+                  #  ('Sleep Cycle', 'sleep_cycle', 11),
+                  #  ('Install Date', 'install_date', 20),
+                  #  ('Last Activity', 'last_activity', 20)]
+            print("\nCommand Results:\n")
+            print( TablePrinter(fmt, sep='  ', ul='=')(commands))
+            #for cmd in commands:
+            #    print(cmd)
             print() 
         sys.exit()
 
@@ -193,7 +239,6 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.instruction == 'script':
-        #config = lerc_api.load_config()
         config = ls.get_config
         if args.list_scripts:
             if not config.has_section('scripts'):

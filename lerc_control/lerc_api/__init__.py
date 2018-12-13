@@ -18,7 +18,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def check_config(config, required_keys):
-    # Just make sure the keys show up somewhere in the config - Not a fool-proof check
+    """Just make sure the keys show up somewhere in the config - Not a fool-proof check
+
+    :param ConfigParser config: A configparser.ConfigParser
+    :param list required_keys: A list of required config keys
+    :return: False if a key is missing, else config
+    """
     at_least_one_missing = False
     if isinstance(required_keys, list) and required_keys:
         for key in required_keys:
@@ -45,6 +50,7 @@ def load_config(profile='default', required_keys=[]):
     Configuration items found in later config files take presendence over earlier ones.
 
     :param str profile: (optional) Specifiy a group or company to work with.
+    :param list required_keys: (optional) A list of required config keys to check for
     """
     logger = logging.getLogger(__name__+".load_config")
     config = ConfigParser()
@@ -133,7 +139,7 @@ class Client():
         return self._raw
 
     def refresh(self):
-        """Query the LERC Server to get an updated on this LERC."""
+        """Query the LERC Server to get an update on this LERC."""
         r = requests.get(self._ls.server+'/query', params={'client_id': self.id}, cert=self._ls.cert).json()
         if 'error' in r:
             self.logger.error("{}".format(r['error']))
@@ -260,7 +266,36 @@ class Client():
         command = self.Run('cd "{}" && dir'.format(dir_path))
         command.wait_for_completion()
         results = command.get_results(return_content=True)
-        return results.decode('utf-8').splitlines()
+        dir_lines = results.decode('utf-8').splitlines()
+        results = {}
+        results['dir_lines'] = dir_lines
+        contents = []
+        for line in dir_lines:
+            content = {}
+            if line:
+                if line[2] == '/':
+                    content['name'] = line[line.rfind(' ')+1:]
+                    if 'DIR' in line:
+                        content['type'] = 'DIR'
+                        content['size'] = ''
+                    else:
+                        content['type'] = 'file'
+                        line_no_name = line[:line.rfind(' ')]
+                        content['size'] = line_no_name[line_no_name.rfind(' ')+1:]
+                    contents.append(content)
+                elif 'bytes' in line:
+                    if 'File' in line:
+                        line = line[:line.rfind(' ')]
+                        dir_size = line[line.rfind(' ')+1:]
+                        results['dir_size'] = dir_size
+                    elif 'Dir' in line:
+                        line = line[:line.rfind(' ')]
+                        line = line[:line.rfind(' ')]
+                        drive_free_space = line[line.rfind(' ')+1:]
+                        results['drive_free_space'] = drive_free_space 
+
+        results['dir_dict'] = contents
+        return results
 
     def contain(self):
         """Use the windows firewall to isolate a host. Everything will be blocked but lerc's access outbound. You must attach to a host before using contain.
@@ -375,6 +410,7 @@ class Command():
         return self._raw
 
     def refresh(self, cmd_dict=None):
+        """Query the lerc server and update this command with the latest data."""
         if not cmd_dict:
             r = requests.get(self._ls.server+'/query', cert=self._ls.cert, params={'cmd_id': self.id, 'rc': True}).json()
             if 'commands' in r and len(r['commands']) == 1:
@@ -388,6 +424,7 @@ class Command():
         self.server_file_path = cmd_dict['server_file_path']
 
     def stream_file(self, file_path, position=0):
+        """Stream a file to the lerc server that the server needs to for this command."""
         # file_path - file to send
         # position - position in file to send from (resume capable)
         if not os.path.exists(file_path):
@@ -551,46 +588,13 @@ class lerc_session():
 
     :profile: Specifiy a group or company to work with. These are defined in the lerc.ini config file.
     :server: The name the LERC control server to work with. Default is read from the lerc.ini config file.
-    :host: A lerc client you want to auto-attach to by hostname.
-    :cid: An existing command id you want to work with.
     :chunk_size: The chunk size to use when streaming files between a lerc_session and the LERC server
 
     """
-    host = None
-    client = None
     server = None
-    command = None
     logger = logging.getLogger(__name__+".lerc_session")
 
-    def _detach_host(self): #, server, host):
-        # tell the server we're done with the host
-        if self.host:
-            arguments = {'host': self.host, 'detach': True}
-            try:
-                r = requests.post(self.server+'/command', cert=self.cert, params=arguments)
-                if r.status_code != requests.codes.ok:
-                    self.logger.error(r.text)
-                    return False
-                self.logger.debug("Session destroyed.")
-                return True
-            except:
-                return False
-
-    def attach_client(self, cid):
-        return None
-    
-    def attach_host(self, host):
-        """ Attach to a LERC client by hostname. If a host is already attached to this lerc_session, it will first be detached.
-        """
-        if not host:
-            return None
-        if self.host and self.host != host:
-            self._detach_host()
-        self.host = host
-        self.logger.debug("attaching to host '{}'..".format(host))
-
-    def __init__(self, profile='default', server=None, host=None, client_id=None, chunk_size=4096):
-        #self.config = load_config(profile, required_keys=['server', 'server_ca_cert', 'client_cert', 'client_key'])
+    def __init__(self, profile='default', server=None, chunk_size=4096):
         self.config = check_config(CONFIG, required_keys=['server', 'server_ca_cert', 'client_cert', 'client_key'])
         self.profile = profile
         if server:
@@ -612,13 +616,7 @@ class lerc_session():
                 # route direct
                 if 'https_proxy' in os.environ:
                     del os.environ['https_proxy']
-        self.attach_host(host)
-        self.client_id = client_id
-        self.command = None
-        self.error = None
-        self.contained = False
         self.chunk_size = chunk_size
-        atexit.register(self._detach_host)
 
     @property
     def get_config(self):
@@ -628,15 +626,25 @@ class lerc_session():
     def get_profile(self):
         return self.profile
 
-    @property
-    def hostname(self):
-        return self.host
-
     def query(self, **kwargs):
         """Query the lerc server database. Very simple queries supported.
-        Note: The 'rc' field stands for return commands. The server will only return command results if this value is set, else only clients.
+        
+        Note: The 'rc' field stands for return commands. By default, command results are only returned if 'rc' is set OR if a 'cmd*' field is set.
+
+        Possible kwargs:
+
+        :param str cmd_id: Command id
+        :param str hostname: lerc hostname
+        :param str operation: Lerc operation
+        :param str cmd_status: Status of a command
+        :param str client_id: ID of a lerc
+        :param str client_status: Status of a lerc
+        :param str version: lerc version
+        :param str company_id: ID of a company/group that lercs are in
+        :param str company: Name of a company/group that lercs are in
         """
         valid_fields = ['rc', 'cmd_id', 'hostname', 'operation', 'cmd_status', 'client_id', 'client_status', 'version', 'company_id', 'company']
+        #valid_fields = QUERY_FIELDS.append('rc')
         keys = kwargs.keys()
         valid_keys = [key for key in keys if key in valid_fields]
         if len(valid_keys) <= 0:
@@ -656,11 +664,17 @@ class lerc_session():
             results['clients'] = [Client(c) for c in r['clients']]
             if 'commands' in r:
                 results['commands'] = [Command(c) for c in r['commands']]
+            if 'client_id_list' in r:
+                results['client_id_list'] = r['client_id_list']
             return results
         return r
 
     def get_command(self, cid):
-        #r = self.query(cmd_id=cid, return_commands=True)
+        """ Get a command by it's id.
+
+        :param int cid: The id of a lerc command.
+        :return: A lerc_api.Command object or False
+        """
         r = self.query(cmd_id=cid, rc=True)
         # querying by command id should always return a single command
         if 'commands' in r and len(r['commands']) == 1:
@@ -668,58 +682,11 @@ class lerc_session():
         self.logger.warn("No command result for {} : {}".format(cid, r))
         return False
 
-    def check_command(self, cid=None):
-        """Check on a specific command by id. If None is give, the command_id in any command associated to this lerc_session will be used. Else, return False.
-
-        :param int cid: (optional) The Id of a command you want to get the status of.
-        :return: Dictionary representation of a command
-        """
-        if not cid:
-            if not self.command:
-                self.logger.error("No command has been attached to this session")
-                return False
-            cid = self.command['command_id']
-
-        arguments = {'cid':cid}
-        if self.host:
-            arguments['host'] = self.host
-        self.logger.debug("Trying to get command {}".format(cid))
-        r = requests.get(self.server+'/command', cert=self.cert, params=arguments).json()
-        if 'error' in r:
-            if 'message' in r: # server error
-                self.logger.error("{} : {}".format(r['message'], r['error']))
-            else: # error from client shouldn't be logged as errors here
-                #self.logger.error("{}".format(r['error']))
-                self.command = r
-            return r
-        if 'hostname' in r and self.host is None:
-            self.attach_host(r['hostname'])
-        # save/update a copy of the current command
-        self.command = r
-        return self.command
-
-    def check_host(self, host=None):
-        """Get the status of a client by hostname. Will attach the lerc_session to the hostname if the client exists.
-
-        :param str host: (optional) The hostname of a lerc client.
-        :return: A lerc client summary or False
-        :rtype: dict representation of client or False
-        """
-        if not host and not self.host:
-            self.logger.error("No host specified.")
-            return False
-        if not host:
-            host = self.host
-        r = requests.get(self.server+'/command', params={'host': host}, cert=self.cert).json()
-        if 'client' in r:
-            self.attach_host(host)
-            return r['client']
-        else:
-            self.logger.debug("{}".format(r))
-            return False
-
     def get_host(self, hostname):
         """Query for a lerc by hostname. Return a Client object if one lerc is found, else a list of Clients.
+
+        :param str hostname: The hostname of a lerc
+        :return: False if no lerc by the hostname, a lerc_api.Client object if a sigle lerc, else a list of lerc_api.Clients
         """
         result = self.query(hostname=hostname)
         if 'clients' in result:
@@ -731,53 +698,30 @@ class lerc_session():
             else:
                 self.logger.info("No lerc found by this hostname: {}".format(hostname))
                 return False
-        
 
     def get_client(self, cid):
         """Get a client by it's id.
 
         :param int cid: The id of a lerc
-        :return: A lerc_api.Client object
+        :return: A lerc_api.Client object of False
         """
         # should only ever return one lerc
         r = self.query(client_id=cid)
         if 'clients' in r and len(r['clients']) == 1:
             return r['clients'][0]
-        self.logger.error("No Client with ID {} exists.".format(cid))
+        self.logger.info("No Client with ID {} exists.".format(cid))
         return False
 
-    def get_hosts(self):
-        """Yeild dictionary representations of lerc clients.
+    def yield_hosts(self):
+        """Yeild every lerc clients the server knows about.
         """
-        host_id = 0
-        r = requests.get(self.server+'/command', params={'hid': host_id}, cert=self.cert).json()
-        # there is no host by id 0, but when you query the server for a hid that doesn't exsit,
-        # the response will be an error, that also contains a list of the valid host ids
-        if 'host_ids' not in r:
-            self.logger.error('Unexpected answer from server: result="{}"'.format(r))
-            raise Exception('Unexpected answer from server', 'result="{}"'.format(r))
-        hids = r['host_ids']
-        for host_id in hids:
-            r = requests.get(self.server+'/command', params={'hid': host_id}, cert=self.cert).json()
-            if 'error' in r:
-                self.logger.error("{}".format(r['error']))
-            yield r
-
-    def get_command_queue(self, host=None):
-        """Get the entire command queue for a lerc client by hostname.
-
-        :param str host: (optional) The hostname of a lerc client.
-        :return: A list of commands for a client, each list entry is a dictionary representation of a command
-        """
-        if host:
-            self.attach_host(host)
-        if not self.host:
-            self.logger.error("No host specified.")
+        # The server will give us a list of valid client ids when we give a valid
+        # query that returns no results -- a client by id zero does not exist.
+        result = self.query(client_id=0)
+        if 'client_id_list' not in result:
+            self.logger.error("Unexpected result from lerc server : {}".format(result))
             return False
-        r = requests.get(self.server+'/command', params={'host': self.host}, cert=self.cert).json()
-        if 'commands' in r:
-            return r['commands']
-        else:
-            self.logger.error("{}".format(r))
-            return r
+        client_ids = result['client_id_list']
+        for id in client_ids:
+            yield self.get_client(id)
 
