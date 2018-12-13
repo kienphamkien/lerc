@@ -106,7 +106,7 @@ class Clients(db.Model):
                 'version': self.version}
 
        
-class Company_Mapping(db.Model):
+class CompanyMapping(db.Model):
     id = db.Column(db.Integer, primary_key = True)
     name = db.Column(db.String(128), unique=True)
 

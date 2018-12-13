@@ -14,7 +14,7 @@ from flask import Flask, request, jsonify, stream_with_context, Response, make_r
 from werkzeug.serving import WSGIRequestHandler
 
 import library.clientInstructions as ci
-from library.database import db, operationTypes, cmdStatusTypes, clientStatusTypes, Commands, Clients, Company_Mapping
+from library.database import db, operationTypes, cmdStatusTypes, clientStatusTypes, Commands, Clients, CompanyMapping
 
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -500,7 +500,7 @@ class Query(Resource):
                 perform_client_query = True
                 break
         # A special rc argument must be set to inform 
-        # the server that command results are wanted
+        # the server that c mmand results are wanted
         return_commands = request.args.get('rc')
         if not perform_client_query and not return_commands:
             logger.warn("Query will not return results : {}".format(request.args))
@@ -511,7 +511,7 @@ class Query(Resource):
         hostname = request.args.get('hostname')
         cmd_status = request.args.get('cmd_status')
         op = request.args.get('operation')
-        client_status = request.args.get('status')
+        client_status = request.args.get('client_status')
         version = request.args.get('version')
         company_id = request.args.get('company_id')
         company = request.args.get('company')
@@ -527,7 +527,7 @@ class Query(Resource):
                 if company[0] == '-':
                     negated = True
                     company = company[1:]
-                    comp = Company_Mapping.query.filter_by(name=company).one()
+                comp = CompanyMapping.query.filter_by(name=company).one()
                 if company_id and comp.id != int(company_id):
                     logger.warn("Analyst query argument conflict : company_id and company name")
                 company_id = str(comp.id)
@@ -562,6 +562,10 @@ class Query(Resource):
                     query = query.filter(Clients.company_id==company_id)
             clients = query.all()
             results['clients'] = [client.to_dict() for client in clients]
+            if not results['clients']:
+                # For convienience -- lerc_api.lerc_session.get_hosts()
+                clients = Clients.query.all()
+                results['client_id_list'] = [client.id for client in clients]
 
         # command results
         if return_commands:
