@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import os
 import sys
@@ -7,13 +7,8 @@ import argparse
 import logging
 import coloredlogs
 import pprint
-import lerc_api
-
-# will likely need to changes these local imports to lerc_control.* after pip3 setup is complete
-import collect
-import deploy_lerc
-
-from scripted import execute_script
+from lerc_control import lerc_api, collect, deploy_lerc
+from lerc_control.scripted import execute_script
 
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
@@ -58,7 +53,7 @@ class TablePrinter(object):
         return '\n'.join(res)
 
 
-if __name__ == "__main__":
+def main():
 
     parser = argparse.ArgumentParser(description="User interface to the LERC control server")
     #parser.add_argument('-h', '--hostname', help="the host you'd like to work with")
@@ -72,7 +67,7 @@ if __name__ == "__main__":
 
     # Query
     parser_query = subparsers.add_parser('query', help="Query the LERC Server")
-    parser_query.add_argument('query', help="The search you want to run.")
+    parser_query.add_argument('query', help="The search you want to run. Enter 'fields' to see query fields.")
     parser_query.add_argument('-rc', '--return-commands', action='store_true', help="Return command results (even if no cmd fields specified)")
  
     # Initiate new LERC commands
@@ -118,6 +113,17 @@ if __name__ == "__main__":
         coloredlogs.install(level='DEBUG', logger=logger)
 
     if args.instruction == 'query':
+        if args.query == 'fields':
+            print("\nAvailable query fields:\n")
+            fmt = [ ('Field', 'field', 14),
+                    ('Description', 'description', 80) ]
+            print( TablePrinter(fmt, sep='  ', ul='=')(lerc_api.QUERY_FIELD_DESCRIPTIONS) )
+            print()
+            print("NOTE:")
+            print("  1) Fields are ANDed by default. Fields can be negated by appending '-' or '!' to the front of the field (no space) or by specifying 'NOT ' in front of the field (space).")
+            print("  2) A leading '-' with no space in front will cause the argument parser to misinterpret the query as a command line argument option.")
+            print() 
+            sys.exit()
         query = lerc_api.parse_lerc_server_query(args.query)
         ls = lerc_api.lerc_session()
         if args.return_commands: 
@@ -328,3 +334,4 @@ if __name__ == "__main__":
     print(cmd)
 
     sys.exit()
+

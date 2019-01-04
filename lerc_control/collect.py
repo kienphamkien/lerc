@@ -6,7 +6,7 @@ import shlex
 import pprint
 import logging
 
-import lerc_api
+from lerc_control import lerc_api
 
 logger = logging.getLogger("lerc_control."+__name__)
 

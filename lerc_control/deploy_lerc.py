@@ -14,11 +14,7 @@ import coloredlogs
 from dateutil import tz
 from configparser import ConfigParser
 
-from cbapi import auth
-from cbapi.response import *
-from cbapi.errors import ApiError, ObjectNotFoundError, TimeoutError
-
-import lerc_api
+from lerc_control import lerc_api
 import logging
 
 # configure logging #
@@ -33,6 +29,14 @@ logging.getLogger('cbapi').setLevel(logging.WARNING)
 logger = logging.getLogger("lerc_control."+__name__)
 coloredlogs.install(level='DEBUG', logger=logger)
 
+
+try:
+    from cbapi import auth
+    from cbapi.response import *
+    from cbapi.errors import ApiError, ObjectNotFoundError, TimeoutError
+except:
+    logging.error("cbapi is not installed")
+    sys.exit(1)
 
 HOME_DIR = os.path.dirname(os.path.realpath(__file__)) 
 
