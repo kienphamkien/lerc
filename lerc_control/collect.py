@@ -14,7 +14,12 @@ logger = logging.getLogger("lerc_control."+__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_directory(lerc, dir_path):
+    """Compress a directory with 7zip and upload the compressed result.
 
+    :param lerc_api.Client lerc: A lerc_api.Client
+    :param str dir_path: The path to the client directory
+    :return: list of lerc_api.Command objects on success, else False
+    """
     if not isinstance(lerc, lerc_api.Client):
         logger.error("Argument is of type:{} instead of type lerc_api.Client".format(type(lerc)))
         return False
@@ -66,7 +71,10 @@ def get_directory(lerc, dir_path):
 
 
 def full_collection(lerc):
-
+    #########################################################################################
+    ### This is an Integral Defense custom module built for a private collection package. ###
+    ### :param lerc_api.Client lerc: A lerc Client object                                 ###
+    #########################################################################################
     if not isinstance(lerc, lerc_api.Client):
         logger.error("Argument is of type:{} instead of type lerc_api.Client".format(type(lerc)))
         return False

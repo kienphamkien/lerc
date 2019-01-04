@@ -32,24 +32,43 @@ Structure::
       scripted.py
       collect.py
       remediate.py
-
-Modules:
-
-    :scripted.py: Functionality for running scripted routines
-    :collect.py: All LR collection related modules
-    :remediate.py: All LR remediation related modules
+      helpers.py
 
 .. automodule:: lerc_control
     :members:
 
+Scripted
+~~~~~~~~
+
+The scripted module should only contain classes and functions for running or related to scripted routines.
+
 .. automodule:: lerc_control.scripted
     :members:
+
+Collect
+~~~~~~~
+
+All Live Response collection related classes and function belong in the collect module.
 
 .. automodule:: lerc_control.collect
     :members:
 
+Remediate
+~~~~~~~~~
+
+All Live Response remediation related classes and functions belong in the remediate module.
+
 .. automodule:: lerc_control.remediate
     :members:
+
+Helpers
+~~~~~~~
+
+Global helper and general functions and classes belong in this module.
+
+.. automodule:: lerc_control.helpers
+    :members:
+
 
 LERC User Interface
 -------------------
