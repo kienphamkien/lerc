@@ -36,10 +36,10 @@ def check_config(config, required_keys):
 
 def load_config(profile='default', required_keys=[]):
     """Load lerc configuration. Configuration files are looked for in the following locations::
+        /<python-lib-where-lerc_control-installed>/etc/lerc.ini
         /etc/lerc_control/lerc.ini
         /opt/lerc/lerc_control/etc/lerc.ini
         ~/<current-user>/.lerc_control/lerc.ini
-        /<python-lib-where-lerc_control-installed>/etc/lerc.ini
 
     Configuration items found in later config files take presendence over earlier ones.
 
@@ -51,14 +51,14 @@ def load_config(profile='default', required_keys=[]):
     config_paths = []
     # Get the working lerc_control directory
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # default
+    config_paths.append(os.path.join(BASE_DIR, 'etc', 'lerc.ini'))
     # global
     config_paths.append('/etc/lerc_control/lerc.ini')
     # legacy
     config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
     # user specific
     config_paths.append(os.path.join(os.path.expanduser("~"),'.lerc_control','lerc.ini'))
-    # local & defaults
-    config_paths.append(os.path.join(BASE_DIR, 'etc', 'lerc.ini'))
     finds = []
     for cp in config_paths:
         if os.path.exists(cp):
@@ -100,7 +100,10 @@ for key,value in QUERY_FIELD_DICT.items():
     QUERY_FIELD_DESCRIPTIONS.append({'field': key, 'description': QUERY_FIELD_DICT[key]})
 
 def parse_lerc_server_query(query_str):
-    """This function converts a string from field:value pairs into **args that lerc_session.query can recognize.
+    """This function converts a string from field:value pairs into \*\*args that lerc_session.query can recognize.
+
+    :param str query_str: A query string to be parsed.
+    :return: \*\*args ready for lerc_session.Query()
     """
     logger = logging.getLogger(__name__+".parse_lerc_server_query")
     query_parts = query_str.split()
@@ -729,7 +732,7 @@ class lerc_session():
         return False
 
     def yield_hosts(self):
-        """Yeild every lerc clients the server knows about.
+        """Yeild every lerc client the server knows about.
         """
         # The server will give us a list of valid client ids when we give a valid
         # query that returns no results -- a client by id zero does not exist.
