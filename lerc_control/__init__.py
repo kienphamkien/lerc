@@ -25,16 +25,20 @@ logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
 
 class TablePrinter(object):
-    "Print a list of dicts as a table"
+    """Print a list of dicts as a table.
+
+    :param fmt: list of tuple(heading, key, width)
+    :param sep: string, separation between columns
+    :param ul: string, character to underline column label, or None for no underlining
+    :return: A string representation of the table, ready to be printed
+
+    Each tuple in the fmt list of tuples is like so:
+
+    :heading: str, column label
+    :key: dictionary key to value to print
+    :width: int, column width in chars
+    """
     def __init__(self, fmt, sep=' ', ul=None):
-        """        
-        @param fmt: list of tuple(heading, key, width)
-                        heading: str, column label
-                        key: dictionary key to value to print
-                        width: int, column width in chars
-        @param sep: string, separation between columns
-        @param ul: string, character to underline column label, or None for no underlining
-        """
         super(TablePrinter,self).__init__()
         self.fmt   = str(sep).join('{lb}{0}:{1}{rb}'.format(key, width, lb='{', rb='}') for heading,key,width in fmt)
         self.head  = {key:heading for heading,key,width in fmt}

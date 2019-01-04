@@ -100,7 +100,10 @@ for key,value in QUERY_FIELD_DICT.items():
     QUERY_FIELD_DESCRIPTIONS.append({'field': key, 'description': QUERY_FIELD_DICT[key]})
 
 def parse_lerc_server_query(query_str):
-    """This function converts a string from field:value pairs into **args that lerc_session.query can recognize.
+    """This function converts a string from field:value pairs into \*\*args that lerc_session.query can recognize.
+
+    :param str query_str: A query string to be parsed.
+    :return: \*\*args ready for lerc_session.Query()
     """
     logger = logging.getLogger(__name__+".parse_lerc_server_query")
     query_parts = query_str.split()
@@ -729,7 +732,7 @@ class lerc_session():
         return False
 
     def yield_hosts(self):
-        """Yeild every lerc clients the server knows about.
+        """Yeild every lerc client the server knows about.
         """
         # The server will give us a list of valid client ids when we give a valid
         # query that returns no results -- a client by id zero does not exist.
