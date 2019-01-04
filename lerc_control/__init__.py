@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import time
+import argparse
+import logging
+import coloredlogs
+import pprint
+from lerc_control import lerc_api, collect, deploy_lerc
+from lerc_control.scripted import execute_script
+
+# configure logging #
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(name)s - [%(levelname)s] %(message)s')
+# set noise level
+logging.getLogger('requests').setLevel(logging.WARNING)
+logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+logging.getLogger('lerc_api').setLevel(logging.INFO)
+logging.getLogger('lerc_control').setLevel(logging.WARNING)
+logging.getLogger('lerc_control.scripted').setLevel(logging.INFO)
+logging.getLogger('lerc_control.collect').setLevel(logging.INFO)
+
+logger = logging.getLogger('lerc_ui')
+coloredlogs.install(level='INFO', logger=logger)
+
+class TablePrinter(object):
+    "Print a list of dicts as a table"
+    def __init__(self, fmt, sep=' ', ul=None):
+        """        
+        @param fmt: list of tuple(heading, key, width)
+                        heading: str, column label
+                        key: dictionary key to value to print
+                        width: int, column width in chars
+        @param sep: string, separation between columns
+        @param ul: string, character to underline column label, or None for no underlining
+        """
+        super(TablePrinter,self).__init__()
+        self.fmt   = str(sep).join('{lb}{0}:{1}{rb}'.format(key, width, lb='{', rb='}') for heading,key,width in fmt)
+        self.head  = {key:heading for heading,key,width in fmt}
+        self.ul    = {key:str(ul)*width for heading,key,width in fmt} if ul else None
+        self.width = {key:width for heading,key,width in fmt}
+
+    def row(self, data):
+        return self.fmt.format(**{ k:str(data.get(k,''))[:w] for k,w in self.width.items() })
+
+    def __call__(self, dataList):
+        _r = self.row
+        res = [_r(data) for data in dataList]
+        res.insert(0, _r(self.head))
+        if self.ul:
+            res.insert(1, _r(self.ul))
+        return '\n'.join(res)
+
+
+def main():
+
+    parser = argparse.ArgumentParser(description="User interface to the LERC control server")
+    #parser.add_argument('-h', '--hostname', help="the host you'd like to work with")
+    parser.add_argument('-e', '--environment', action="store", help="specify an environment to work with. Default='default'")
+    parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG")
+    parser.add_argument('-c', '--check', action="store", help="check on a specific command id")
+    parser.add_argument('-r', '--resume', action='store', help="resume a pending command id") 
+    parser.add_argument('-g', '--get', action='store', help="get results for a command id")
+
+    subparsers = parser.add_subparsers(dest='instruction') #title='subcommands', help='additional help')
+
+    # Query
+    parser_query = subparsers.add_parser('query', help="Query the LERC Server")
+    parser_query.add_argument('query', help="The search you want to run. Enter 'fields' to see query fields.")
+    parser_query.add_argument('-rc', '--return-commands', action='store_true', help="Return command results (even if no cmd fields specified)")
+ 
+    # Initiate new LERC commands
+    parser_run = subparsers.add_parser('run', help="Run a shell command on the host.")
+    parser_run.add_argument('hostname', help="the host you'd like to work with")
+    parser_run.add_argument('command', help='The shell command for the host to execute`')
+    parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
+
+    parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
+    parser_upload.add_argument('hostname', help="the host you'd like to work with")
+    parser_upload.add_argument('file_path', help='the file path on the client')
+
+    parser_download = subparsers.add_parser('download', help="Download a file from the server to the client")
+    parser_download.add_argument('hostname', help="the host you'd like to work with")
+    parser_download.add_argument('file_path', help='the path to the file on the server')
+    parser_download.add_argument('-f', '--local-file', help='where the client should write the file')
+
+    parser_quit = subparsers.add_parser('quit', help="tell the client to uninstall itself")
+    parser_quit.add_argument('hostname', help="the host you'd like to work with")
+
+    # response functions
+    parser_collect = subparsers.add_parser('collect', help="Default (no arguments): perform a full lr.exe collection")
+    parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
+    parser_collect.add_argument('hostname', help="the host you'd like to work with")
+
+    parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
+    parser_contain.add_argument('hostname', help="the host you'd like to work with")
+    parser_contain.add_argument('-on', action='store_true', help="turn on containment")
+    parser_contain.add_argument('-off', action='store_true', help="turn off containment")
+    parser_contain.add_argument('-s', '--status', action='store_true', help="Get containment status of host")
+
+    parser_script = subparsers.add_parser('script', help="run a scripted routine on this lerc.")
+    parser_script.add_argument('hostname', help="the host you'd like to work with")
+    parser_script.add_argument('-l', '--list-scripts', action='store_true', help="list scripts availble to lerc_ui")
+    parser_script.add_argument('-s', '--script-name', help="provide the name of a script to run")
+    parser_script.add_argument('-f', '--file-path', help="the path to a custom script you want to execute")
+
+    args = parser.parse_args()
+
+    if args.debug:
+        logging.getLogger('lerc_api').setLevel(logging.DEBUG)
+        logging.getLogger('lerc_control').setLevel(logging.DEBUG)
+        coloredlogs.install(level='DEBUG', logger=logger)
+
+    if args.instruction == 'query':
+        if args.query == 'fields':
+            print("\nAvailable query fields:\n")
+            fmt = [ ('Field', 'field', 14),
+                    ('Description', 'description', 80) ]
+            print( TablePrinter(fmt, sep='  ', ul='=')(lerc_api.QUERY_FIELD_DESCRIPTIONS) )
+            print()
+            print("NOTE:")
+            print("  1) Fields are ANDed by default. Fields can be negated by appending '-' or '!' to the front of the field (no space) or by specifying 'NOT ' in front of the field (space).")
+            print("  2) A leading '-' with no space in front will cause the argument parser to misinterpret the query as a command line argument option.")
+            print() 
+            sys.exit()
+        query = lerc_api.parse_lerc_server_query(args.query)
+        ls = lerc_api.lerc_session()
+        if args.return_commands: 
+            query['rc'] = True
+        results = ls.query(**query)
+        clients = [ c.get_dict for c in results['clients']]
+        fmt = [ ('ID', 'id', 5),
+                ('Hostname', 'hostname', 20),
+                ('Status', 'status', 11),
+                ('Version', 'version', 8),
+                ('Sleep Cycle', 'sleep_cycle', 11),
+                ('Install Date', 'install_date', 20),
+                ('Last Activity', 'last_activity', 20),
+                ('Company ID', 'company_id', 10)]
+        print("\nClient Results:\n")
+        print( TablePrinter(fmt, sep='  ', ul='=')(clients))
+        print("Total Client Results:{}".format(len(clients)))
+        print()
+        commands = [ c.get_dict for c in results['commands']]
+        if commands:
+            fmt = [ ('ID', 'command_id', 9),
+                    ('Client ID', 'client_id', 9),
+                    ('Hostname', 'hostname', 20),
+                    ('Operation', 'operation', 11),
+                    ('Status', 'status', 9)]
+                  #  ('Version', 'version', 8),
+                  #  ('Sleep Cycle', 'sleep_cycle', 11),
+                  #  ('Install Date', 'install_date', 20),
+                  #  ('Last Activity', 'last_activity', 20)]
+            print("\nCommand Results:\n")
+            print( TablePrinter(fmt, sep='  ', ul='=')(commands))
+            #for cmd in commands:
+            #    print(cmd)
+            print() 
+        sys.exit()
+
+    # a local lerc_session will be needed to go any further
+    ls = lerc_api.lerc_session()
+
+    # root options
+    if args.check:
+        command = ls.get_command(args.check)
+        print(command)
+        sys.exit()
+    elif args.get:
+        command = ls.get_command(args.get)
+        if command:
+            command.get_results(chunk_size=16384)
+            print(command)
+        sys.exit()
+    elif args.resume:
+        command = ls.get_command(args.resume)
+        command.wait_for_completion()
+        if command:
+            print(command)
+        sys.exit()
+
+    # if we're here, then an instructions been specified and the args.hostname is a thing
+    client = ls.get_host(args.hostname)
+    if isinstance(client, list):
+        logger.critical("More than one result. Not handled yet..")
+        for c in client:
+            print(c)
+            print()
+        sys.exit(1) 
+
+    # Auto-Deployment Jazz
+    bad_status = False
+    if client:
+        if client.status == 'UNINSTALLED' or client.status == 'UNKNOWN':
+            logger.info("Non-working client status : {}".format(client.status))
+            bad_status = True
+
+    if not client or bad_status:
+        config = ls.get_config
+        if config.has_option('default', 'cb_auto_deploy') and not config['default'].getboolean('cb_auto_deploy'):
+            logger.info("CarbonBlack auto-deployment turned off. Exiting..")
+            sys.exit(0)
+        logger.info("Attempting to deploy lerc with CarbonBlack..")
+        try:
+            from cbapi import auth
+            from deploy_lerc import deploy_lerc, CbSensor_search
+        except:
+            logger.error("Failed to import deployment functions from lerc_control.deploy_lerc OR cbapi.")
+            sys.exit(1)
+        logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.ERROR)
+        environments = auth.CredentialStore("response").get_profiles()
+        sensors = []
+        logger.debug("Trying to find the sensor in the available carbonblack environments.")
+        for env in environments:         
+            sensor = CbSensor_search(env, args.hostname)
+            if sensor:
+                logger.debug("Found sensor in {} environment".format(env))
+                sensors.append((env, sensor))
+        if len(sensors) > 1:
+            logger.error("A CarbonBlack Sensor was found by that hostname in multiple environments.")
+            sys.exit(1)
+        elif sensors:
+            logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.INFO)
+            sensor = sensors[0][1]
+            config = lerc_api.check_config(config, required_keys=['lerc_install_cmd', 'client_installer'])
+            result = deploy_lerc(sensor, config[sensors[0][0]]['lerc_install_cmd'], lerc_installer_path=config['default']['client_installer'])
+            if result: # modify deploy_lerc to use new client objects
+                logger.info("Successfully deployed lerc to this host: {}".format(args.hostname))
+                client = ls.get_host(args.hostname)
+        else:
+            logger.error("Didn't find a sensor in CarbonBlack by this hostname")
+            sys.exit(0)
+ 
+    # collections
+    profile=args.environment if args.environment else 'default'
+    if args.instruction == 'collect':
+        if not args.debug:
+            logging.getLogger('lerc_api').setLevel(logging.WARNING)
+        if args.directory:
+            commands = collect.get_directory(client, args.directory)
+        else:
+            collect.full_collection(client)
+        sys.exit(0)
+
+    if args.instruction == 'script':
+        config = ls.get_config
+        if args.list_scripts:
+            if not config.has_section('scripts'):
+                print("\nNo pre-existing scripts have been made availble.")
+                sys.exit(0)           
+            print("\nAvailable scripts:")
+            for sname in config['scripts']:
+                print("\t{}".format(sname))
+            print()
+            sys.exit(0)
+        elif args.script_name:
+            if not config.has_option('scripts', args.script_name):
+                logger.error("{} is not a defined script".format(args.script_name))
+                sys.exit(1)
+            script_path = config['scripts'][args.script_name]
+            commands = execute_script(client, script_path)
+            sys.exit(0)
+        elif args.file_path:
+            if not os.path.exists(args.file_path):
+                logger.error("Could not find script file at '{}'".format(args.file_path))
+                sys.exit(1)
+            commands = execute_script(client, args.file_path)
+            sys.exit(0)
+        else:
+            logger.info("No argument was specified for the script command. Exiting.")
+            sys.exit(0)
+
+    # Else, see if we're running a command directly
+    cmd = None
+    if args.instruction == 'run':
+        if args.async:
+            cmd = client.Run(args.command, async=args.async)
+        else:
+            cmd = client.Run(args.command)
+
+    elif args.instruction == 'contain':
+        if args.on:
+            client.contain()
+        elif args.off:
+            client.release_containment()
+        elif args.status:
+            print("Containment status check not yet implemented.")
+
+    elif args.instruction == 'download':
+        # if client_file_path is not specified the client will write the file to it's local dir
+        analyst_file_path = os.path.abspath(args.file_path)
+        file_name = args.file_path[args.file_path.rfind('/')+1:]
+        if args.local_file is None:
+            args.local_file = file_name
+        cmd = client.Download(file_name, client_file_path=args.local_file, analyst_file_path=analyst_file_path)
+
+    elif args.instruction == 'upload':
+        cmd = client.Upload(args.file_path)
+
+    elif args.instruction == 'quit':
+        cmd = client.Quit()
+    elif args.check:
+        command = ls.get_command(args.check)
+        print(command)
+        sys.exit()
+    elif args.get:
+        command = ls.get_command(args.get)
+        if command:
+            command.get_results(chunk_size=16384)
+            print(command)
+        sys.exit()
+    elif args.resume:
+        command = ls.get_command(args.resume)
+        command.wait_for_completion()
+        if command:
+            print(command)
+        sys.exit()
+    else:
+        print(client)
+        sys.exit()
+
+    if not cmd:
+        sys.exit(1)
+
+    start_time = time.time() 
+    if not cmd.wait_for_completion():
+        logger.warning("{} (ID:{}) command went to a {} state. Exiting.".format(cmd.operation, cmd.id, cmd.status))
+        sys.exit(1)
+    logger.info("{} command {} completed successfully".format(cmd.operation, cmd.id))
+    cmd.get_results()
+
+    print(cmd)
+
+    sys.exit()
+

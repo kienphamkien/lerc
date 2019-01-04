@@ -25,6 +25,7 @@ class clientStatusTypes(enum.Enum):
     OFFLINE = 'OFFLINE'
     UNKNOWN = 'UNKNOWN'
     UNINSTALLED = 'UNINSTALLED'
+    BUSY = 'BUSY'
 
 class Commands(db.Model):
     command_id = db.Column(db.Integer, primary_key = True)
@@ -39,11 +40,13 @@ class Commands(db.Model):
     log_file_path = db.Column(db.String(1024))
     analyst_file_path = db.Column(db.String(1024))
     async_run = db.Column(db.Boolean, default=False)
+    client_id = db.Column(db.Integer)
 
-    def __init__(self, hostname, operation, client_file_path=None,
+    def __init__(self, hostname, operation, client_id, client_file_path=None,
                  server_file_path=None, command=None, analyst_file_path=None, async_run=False):
        self.hostname = hostname
        self.operation = operation
+       self.client_id = client_id
        self.client_file_path = client_file_path
        self.server_file_path = server_file_path
        self.analyst_file_path = analyst_file_path
@@ -60,6 +63,7 @@ class Commands(db.Model):
     def to_dict(self):
         return {'command_id': self.command_id,
                 'hostname': self.hostname,
+                'client_id': self.client_id,
                 'operation': self.operation.name,
                 'async_run': self.async_run,
                 'client_file_path': self.client_file_path,
@@ -100,5 +104,14 @@ class Clients(db.Model):
                 'sleep_cycle': self.sleep_cycle,
                 'id': self.id,
                 'version': self.version}
+
+       
+class CompanyMapping(db.Model):
+    id = db.Column(db.Integer, primary_key = True)
+    name = db.Column(db.String(128), unique=True)
+
+    def __init__(self, name):
+        self.name = name
+
 # End DB models #
 

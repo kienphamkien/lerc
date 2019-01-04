@@ -42,7 +42,7 @@ def upgrade_host(hostname, upgrade_bat_path, lerc_msi_path):
     host_commands = []
 
     ls = lerc_api.lerc_session()
-    host = ls.check_host(hostname)
+    host = ls.get_host(hostname)
     if not host:
         logging.error("'{}' does not exist.".format(hostname))
         return "ERROR: '{}' does not exist.".format(hostname)
@@ -50,22 +50,22 @@ def upgrade_host(hostname, upgrade_bat_path, lerc_msi_path):
     logger.info("Issuing upgrade commands to {}".format(hostname))
 
     # delete any existing lercSetup.msi that might already be on the host
-    result = ls.Run("DEL lercSetup.msi")
+    result = host.Run("DEL lercSetup.msi")
     host_commands.append(result)
 
     file_name = lerc_msi_path[lerc_msi_path.rfind('/')+1:]
-    result = ls.Download(file_name, client_file_path=file_name, analyst_file_path=lerc_msi_path)
+    result = host.Download(file_name, client_file_path=file_name, analyst_file_path=lerc_msi_path)
     host_commands.append(result)
 
     file_name = upgrade_bat_path[upgrade_bat_path.rfind('/')+1:]
-    result = ls.Download(file_name, client_file_path=file_name, analyst_file_path=upgrade_bat_path)
+    result = host.Download(file_name, client_file_path=file_name, analyst_file_path=upgrade_bat_path)
     host_commands.append(result)
 
     run_cmd = config['default']['upgrade_cmd']
-    result = ls.Run(run_cmd.format(host['company_id']), async=True)
+    result = host.Run(run_cmd.format(host.id), async=True)
     host_commands.append(result)
 
-    result = ls.Quit()
+    result = host.Quit()
     host_commands.append(result)
     return host_commands
 
@@ -78,22 +78,22 @@ def compare_version_strings(client, production_lerc_version):
     :return: True if the client version is older than the production version; False if equal or greater.
     """
     logger = logging.getLogger(__name__+".compare_versions")
-    logger.debug("Version comparision : Client Current Version={} - Production Version={}".format(client['version'], production_lerc_version))
+    logger.debug("Version comparision : Client Current Version={} - Production Version={}".format(client.version, production_lerc_version))
     production_lerc_version_str = production_lerc_version
     production_lerc_version = production_lerc_version.split('.')
-    if client['version'] == production_lerc_version_str:
-        logger.warn("Client '{}' is already at the current production version '{}'".format(args.client_hostname, production_lerc_version_str))
+    if client.version == production_lerc_version_str:
+        logger.warn("Client '{}' is already at the current production version '{}'".format(client.hostname, production_lerc_version_str))
         return False
     else:
-        client_ver = client['version'].split('.')
+        client_ver = client.version.split('.')
         if len(client_ver) != len(production_lerc_version):
-            logger.error("Version annomoly - client:{} and configuration:{}".format(client['version'], production_lerc_version_str))
-            sys.exit(1)
+            logger.warn("Version annomoly on {} - client version:{} and production version:{}".format(client.hostname, client.version, production_lerc_version_str))
+            return False
         for i in range(len(client_ver)):
             if client_ver[i] < production_lerc_version[i]:
                 return True
         else:
-            logger.error("Client version:{} greater than production_lerc_version:{}. Is your configuration wrong?".format(client['version'], production_lerc_version_str))
+            logger.error("Client version:{} greater than production_lerc_version:{}. Is your configuration wrong?".format(client.version, production_lerc_version_str))
             return False
 
 
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     ls = lerc_api.lerc_session()
 
     if args.client_hostname:
-        client = ls.check_host(args.client_hostname)
+        client = ls.get_host(args.client_hostname)
         if not client:
             logger.error("Client doesn't exist")
             sys.exit(1)
@@ -159,12 +159,12 @@ if __name__ == "__main__":
             if company_id is None:
                 logger.error("Company id is not specified in the configuration for '{}'".format(args.environment))
                 sys.exit(1)
-            elif company_id != int(client['company_id']):
+            elif company_id != int(client.company_id):
                 logger.warn("Client company id and company id for '{}' do not match. Wrong hostname?".format(args.environment))
                 sys.exit(1)
         if not args.force:
             # check lerc version strings
-            if 'version' in client and client['version'] is not None:
+            if client.version is not None:
                 proceed = compare_version_strings(client, production_lerc_version)
                 if not proceed: # we exit since we're only working on one host
                     sys.exit(1)
@@ -176,23 +176,23 @@ if __name__ == "__main__":
         sys.exit()
 
     host_commands = {}
-    for host in ls.get_hosts():
-        if host['hostname'] == 'WIN-1TMIV79KTI8' or host['hostname'] == 'icinga' \
-                                                 or host['hostname'] == 'W7GOTCHAPC':
+    for host in ls.yield_hosts():
+        if host.hostname == 'WIN-1TMIV79KTI8' or host.hostname == 'icinga' \
+                                                 or host.hostname == 'W7GOTCHAPC':
             continue
         if args.environment:
             if company_id is None:
                 logger.error("Company id is not specified in the configuration for '{}'".format(args.environment))
                 sys.exit(1)
-            elif company_id != int(client['company_id']):
-                logger.debug("Client company id and company id for '{}' do not match for {}/{}".format(args.environment, host['hostname'], host['id']))
+            elif company_id != int(host.company_id):
+                logger.debug("Client company id and company id for '{}' do not match for {}/{}".format(args.environment, host.hostname, host.id))
                 continue
-        if host['status'] != 'UNINSTALLED':
+        if host.status != 'UNINSTALLED':
             if not compare_version_strings(host, production_lerc_version):
                 continue
-            host_commands[host['hostname']] = upgrade_host(host['hostname'], upgrade_bat_path, lerc_msi_path)
+            host_commands[host.hostname] = upgrade_host(host.hostname, upgrade_bat_path, lerc_msi_path)
 
-    if args.write_comands:
+    if args.write_commands:
         with open("lerc_upgrade_commands.txt", 'w') as fh:
             fh.write(pprint.pformat(host_commands))
         print("Wrote lerc_upgrade_commands.txt.")
