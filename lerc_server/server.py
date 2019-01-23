@@ -469,7 +469,7 @@ class Error(Resource):
                      'error': str(error_message)}
         with open(os.path.join(BASE_DIR, command.log_file_path), 'w') as f:
             json.dump(error_log, f)
-        logger.error("Error message from host={} for command_id={} : '{}'".format(host, cid, error_message))
+        logger.warn("Error message from host={} for command_id={} : '{}'".format(host, cid, error_message))
         return False
 # end client api resources
 

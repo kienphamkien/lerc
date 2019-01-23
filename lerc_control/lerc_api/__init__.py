@@ -18,6 +18,7 @@ def check_config(config, required_keys):
     :param list required_keys: A list of required config keys
     :return: False if a key is missing, else config
     """
+    logger = logging.getLogger(__name__+".check_config")
     at_least_one_missing = False
     if isinstance(required_keys, list) and required_keys:
         for key in required_keys:
