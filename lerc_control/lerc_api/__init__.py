@@ -3,18 +3,12 @@ import os
 import sys
 import time
 import json
-import atexit
-import pprint
 import logging
 import requests
 from hashlib import md5
 from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
-
-
-# Get the working lerc_control directory
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def check_config(config, required_keys):
@@ -42,10 +36,10 @@ def check_config(config, required_keys):
 
 def load_config(profile='default', required_keys=[]):
     """Load lerc configuration. Configuration files are looked for in the following locations::
+        /<python-lib-where-lerc_control-installed>/etc/lerc.ini
         /etc/lerc_control/lerc.ini
         /opt/lerc/lerc_control/etc/lerc.ini
         ~/<current-user>/.lerc_control/lerc.ini
-        /<python-lib-where-lerc_control-installed>/etc/lerc.ini
 
     Configuration items found in later config files take presendence over earlier ones.
 
@@ -55,14 +49,16 @@ def load_config(profile='default', required_keys=[]):
     logger = logging.getLogger(__name__+".load_config")
     config = ConfigParser()
     config_paths = []
+    # Get the working lerc_control directory
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # default
+    config_paths.append(os.path.join(BASE_DIR, 'etc', 'lerc.ini'))
     # global
     config_paths.append('/etc/lerc_control/lerc.ini')
     # legacy
     config_paths.append('/opt/lerc/lerc_control/etc/lerc.ini')
     # user specific
     config_paths.append(os.path.join(os.path.expanduser("~"),'.lerc_control','lerc.ini'))
-    # local & defaults
-    config_paths.append(os.path.join(BASE_DIR, 'etc', 'lerc.ini'))
     finds = []
     for cp in config_paths:
         if os.path.exists(cp):
@@ -84,26 +80,49 @@ def load_config(profile='default', required_keys=[]):
 
     return config
 
+
 ######################
 ## lerc_api GLOBALS ##
 ######################
 CONFIG = load_config()
 QUERY_FIELDS = ['cmd_id', 'hostname', 'operation', 'cmd_status', 'client_id', 'client_status', 'version', 'company_id', 'company']
+QUERY_FIELD_DICT = {'cmd_id': 'The ID of a specific command',
+                    'hostname': 'The hostname of a client',
+                    'operation': 'A Command operation type: upload,run,download,quit',
+                    'cmd_status': 'The status of a command: pending,preparing,complete,error,unknown,started',
+                    'client_id': 'Specify a LERC by ID',
+                    'client_status': 'A LERC status: busy,online,offline,unknown,uninstalled',
+                    'version': 'The LERC version string',
+                    'company_id': 'Specify a company/group ID',
+                    'company': 'A company/group name'}
+QUERY_FIELD_DESCRIPTIONS = []
+for key,value in QUERY_FIELD_DICT.items():
+    QUERY_FIELD_DESCRIPTIONS.append({'field': key, 'description': QUERY_FIELD_DICT[key]})
 
 def parse_lerc_server_query(query_str):
-    """This function converts a string from field:value pairs into **args that lerc_session.query can recognize.
+    """This function converts a string from field:value pairs into \*\*args that lerc_session.query can recognize.
+
+    :param str query_str: A query string to be parsed.
+    :return: \*\*args ready for lerc_session.Query()
     """
     logger = logging.getLogger(__name__+".parse_lerc_server_query")
     query_parts = query_str.split()
     args = {}
+    negated_with_not = False
     for part in query_parts:
         negated = False
         if part[0] == '-' or part[0] == '!':
             negated = True
             part = part[1:]
+        elif part.upper() == 'NOT':
+            negated_with_not = True
+            continue
+        if negated_with_not:
+            negated = True
+            negated_with_not = False
         field = part[:part.find(':')]
         if field not in QUERY_FIELDS:
-            logger.error("{} is not a valid query filed. Valid fields: {}".format(field, QUERY_FIELDS))
+            logger.critical("{} is not a valid query filed. Valid fields: {}".format(field, QUERY_FIELDS))
             return False
         value = part[part.find(':')+1:]
         if negated:
@@ -213,7 +232,7 @@ class Client():
             else:
                 if 'error' not in result:
                     raise Exception("Unexpected result: {}".format(result))
-                self.logger.error(self.error)
+                self.logger.error("{}".format(results['error']))
                 return False
 
 
@@ -713,7 +732,7 @@ class lerc_session():
         return False
 
     def yield_hosts(self):
-        """Yeild every lerc clients the server knows about.
+        """Yeild every lerc client the server knows about.
         """
         # The server will give us a list of valid client ids when we give a valid
         # query that returns no results -- a client by id zero does not exist.

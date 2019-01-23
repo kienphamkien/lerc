@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import os
 import sys
@@ -7,13 +7,9 @@ import argparse
 import logging
 import coloredlogs
 import pprint
-import lerc_api
-
-# will likely need to changes these local imports to lerc_control.* after pip3 setup is complete
-import collect
-import deploy_lerc
-
-from scripted import execute_script
+from lerc_control import lerc_api, collect, deploy_lerc
+from lerc_control.scripted import execute_script
+from lerc_control.helpers import TablePrinter
 
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
@@ -29,36 +25,8 @@ logging.getLogger('lerc_control.collect').setLevel(logging.INFO)
 logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
 
-class TablePrinter(object):
-    "Print a list of dicts as a table"
-    def __init__(self, fmt, sep=' ', ul=None):
-        """        
-        @param fmt: list of tuple(heading, key, width)
-                        heading: str, column label
-                        key: dictionary key to value to print
-                        width: int, column width in chars
-        @param sep: string, separation between columns
-        @param ul: string, character to underline column label, or None for no underlining
-        """
-        super(TablePrinter,self).__init__()
-        self.fmt   = str(sep).join('{lb}{0}:{1}{rb}'.format(key, width, lb='{', rb='}') for heading,key,width in fmt)
-        self.head  = {key:heading for heading,key,width in fmt}
-        self.ul    = {key:str(ul)*width for heading,key,width in fmt} if ul else None
-        self.width = {key:width for heading,key,width in fmt}
 
-    def row(self, data):
-        return self.fmt.format(**{ k:str(data.get(k,''))[:w] for k,w in self.width.items() })
-
-    def __call__(self, dataList):
-        _r = self.row
-        res = [_r(data) for data in dataList]
-        res.insert(0, _r(self.head))
-        if self.ul:
-            res.insert(1, _r(self.ul))
-        return '\n'.join(res)
-
-
-if __name__ == "__main__":
+def main():
 
     parser = argparse.ArgumentParser(description="User interface to the LERC control server")
     #parser.add_argument('-h', '--hostname', help="the host you'd like to work with")
@@ -72,7 +40,7 @@ if __name__ == "__main__":
 
     # Query
     parser_query = subparsers.add_parser('query', help="Query the LERC Server")
-    parser_query.add_argument('query', help="The search you want to run.")
+    parser_query.add_argument('query', help="The search you want to run. Enter 'fields' to see query fields.")
     parser_query.add_argument('-rc', '--return-commands', action='store_true', help="Return command results (even if no cmd fields specified)")
  
     # Initiate new LERC commands
@@ -118,6 +86,17 @@ if __name__ == "__main__":
         coloredlogs.install(level='DEBUG', logger=logger)
 
     if args.instruction == 'query':
+        if args.query == 'fields':
+            print("\nAvailable query fields:\n")
+            fmt = [ ('Field', 'field', 14),
+                    ('Description', 'description', 80) ]
+            print( TablePrinter(fmt, sep='  ', ul='=')(lerc_api.QUERY_FIELD_DESCRIPTIONS) )
+            print()
+            print("NOTE:")
+            print("  1) Fields are ANDed by default. Fields can be negated by appending '-' or '!' to the front of the field (no space) or by specifying 'NOT ' in front of the field (space).")
+            print("  2) A leading '-' with no space in front will cause the argument parser to misinterpret the query as a command line argument option.")
+            print() 
+            sys.exit()
         query = lerc_api.parse_lerc_server_query(args.query)
         ls = lerc_api.lerc_session()
         if args.return_commands: 
@@ -328,3 +307,4 @@ if __name__ == "__main__":
     print(cmd)
 
     sys.exit()
+

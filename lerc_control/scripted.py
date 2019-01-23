@@ -2,7 +2,7 @@
 import os
 import logging
 import pprint
-import lerc_api
+from lerc_control import lerc_api
 from configparser import ConfigParser
 
 logger = logging.getLogger("lerc_control."+__name__)
