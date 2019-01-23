@@ -101,6 +101,13 @@ class CustomRequestHandler(WSGIRequestHandler):
 def host_check(host, company, version=None):
     # known host?
     client = Clients.query.filter_by(hostname=host).first()
+    try:
+        comp = CompanyMapping.query.filter_by(id=company).one()
+        if not comp:
+            logger.warn("Company '{}' does not exist in fetch from hostname: {}".format(company, host))
+    except Exception as e:
+        logger.warn("No Company in database with ID:{} - fetch from hostname:{}".format(company, host))
+
     if client is None:
         new_client = Clients(host, company_id=company, sleep_cycle=15, version=version)
         db.session.add(new_client)
@@ -208,22 +215,24 @@ def receive_streamed_data(command):
 # Begin server API for client resources
 class Fetch(Resource):
     def get(self):
-        if 'host' not in request.args:
-            logger.error("Malformed request")
+
+        version = request.args.get('version')
+        host = request.args.get('host')
+        company = request.args.get('company')
+
+        if not host:
+            logger.error("Malformed Fetch")
             return None
-        if 'company' not in request.args:
-            logger.error("Malformed request")
+        if not company:
+            logger.error("Malformed Fetch")
             return None
 
-        version = None
-        if 'version' in request.args:
-            version = request.args['version']
-        host = request.args['host']
-        company = request.args['company']
         client = host_check(host, int(company), version=version)
+
         if not client:
             # if something is not right, always issue sleep
             return ci.Sleep(DEFAULT_SLEEP)
+
         command = command_manager(host)
 
         if command:
@@ -349,8 +358,8 @@ class Upload(Resource):
             command.status = cmdStatusTypes.COMPLETE
             db.session.commit()
         else:
-            logger.error("{} indicates upload command {} complete, however, {}/{} filesize mismatch".format(host, command.command_id,
-                                                                                                  statinfo.st_size, command.filesize))
+            logger.warn("{} indicates upload command {} complete, however, {}/{} filesize mismatch".format(host, command.command_id,
+                                                                                               statinfo.st_size, command.filesize))
             command.status = cmdStatusTypes.UNKNOWN
             db.session.commit()
         return True
@@ -380,7 +389,6 @@ class Download(Resource):
         # This should really only detect when someone runs the exact same Download command
         if command.file_position == statinfo.st_size:
             logger.warning("File at same path and of same size is already on {}. Previously repeated command?".format(host))
-            # Do we want to note this back to the analyst?
             command.status = cmdStatusTypes.COMPLETE
             db.session.commit()
             logger.info("Download command {} completed successfully".format(command.command_id))
@@ -500,7 +508,7 @@ class Query(Resource):
                 perform_client_query = True
                 break
         # A special rc argument must be set to inform 
-        # the server that c mmand results are wanted
+        # the server that command results are wanted
         return_commands = request.args.get('rc')
         if not perform_client_query and not return_commands:
             logger.warn("Query will not return results : {}".format(request.args))
@@ -614,9 +622,9 @@ class Command(Resource):
         client_id = request.args.get('id')
         host = request.args.get('host')
 
-        if not host:
+        if not host and not client_id:
             logger.error("Malformed Error request")
-            return make_response("Missing host argument", 400)
+            return make_response("Missing arguments", 400)
 
         # make sure host exists in client tabel
         client = Clients.query.filter_by(hostname=host).first()
@@ -632,18 +640,10 @@ class Command(Resource):
                         'message': "Not Found",
                         'error': "No LERC client installed on a host by name '{}'.".format(host)}
 
-        if 'detach' in request.args:
-            # set the client's sleep time back to default
-            client.sleep_cycle = DEFAULT_SLEEP
-            db.session.commit()
-            logger.debug("Analyst detched from '{}'. Set client back to default sleep cycle".format(host))
-            return custom_response(200, 'client {} set to default sleep')
-
         if not request.is_json:
             logger.error("Command request is not json")
             return make_response("Command request is not json", 400)
 
-        host = request.args['host']
         command = request.json
 
         logger.info("Receiving Analyst command for {}".format(host))
@@ -681,6 +681,7 @@ class Command(Resource):
         return None 
 
     def get(self):
+        ## XXX Deprecated - Replaced by Query. Leaving here for now
         # command/host status and result retrival
         host = None
         if 'host' not in request.args and 'cid' not in request.args and 'hid' not in request.args:
@@ -836,7 +837,7 @@ class AnalystDownload(Resource):
                         'message': 'Not Found',
                         'error': 'Results do not exist at {} - note: old results are purged routinely'.format(result_file_check)} 
 
-        if 'cid' not in request.args or 'position' not in request.args:
+        if 'cid' not in request.args:
             logger.warn("Malformed analyst download request")
             return {'status_code': '400',
                     'message': 'Bad Request',
@@ -847,6 +848,20 @@ class AnalystDownload(Resource):
             return {'status_code':'404',
                     'message': "Not Found",
                     'error': "Command id '{}' does not exist.".format(cid)}
+
+        get_error_report = request.args.get('error')
+        if get_error_report:
+            if command.log_file_path:
+                error_report = None
+                with open(os.path.join(BASE_DIR, command.log_file_path), 'r') as f:
+                    error_report = json.loads(f.read())
+                return error_report
+
+        if 'position' not in request.args:
+            logger.warn("Malformed analyst download request")
+            return {'status_code': '400',
+                    'message': 'Bad Request',
+                    'error': 'missing required arguments'}
 
         #Make sure the result file exists - don't assume result_file_check happened correctly
         if not os.path.exists(os.path.join(BASE_DIR, command.server_file_path)):
