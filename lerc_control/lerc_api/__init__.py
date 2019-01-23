@@ -475,6 +475,15 @@ class Command():
         self.refresh(cmd_dict=r)
         return True
 
+    @property
+    def get_error_report(self):
+        """If an error report exists for this command, get it.
+        """
+        arguments = {'cid': self.id, 'error': True}
+        r = requests.get(self._ls.server+'/command/download', cert=self._ls.cert, params=arguments).json()
+        return r
+
+
     def get_results(self, file_path=None, chunk_size=None, print_run=True, return_content=False, position=0):
         """Get any results available for a command. If cid is None, any cid currently assigned to the lerc_session will be used.
 
@@ -595,6 +604,9 @@ class Command():
                 return True
             else: # Only here if command in UNKNOWN or ERROR state
                 self.logger.info("Command {} state: {}.".format(self.id, self.status))
+                if self.status == 'ERROR':
+                    err = self.get_error_report
+                    self.logger.warn("Error message for command={} : {}".format(self.id, err['error']))
                 return None
 
 

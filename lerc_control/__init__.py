@@ -18,9 +18,9 @@ logging.basicConfig(level=logging.DEBUG,
 logging.getLogger('requests').setLevel(logging.WARNING)
 logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 logging.getLogger('lerc_api').setLevel(logging.INFO)
-logging.getLogger('lerc_control').setLevel(logging.WARNING)
-logging.getLogger('lerc_control.scripted').setLevel(logging.INFO)
-logging.getLogger('lerc_control.collect').setLevel(logging.INFO)
+logging.getLogger('lerc_control').setLevel(logging.INFO)
+#logging.getLogger('lerc_control.scripted').setLevel(logging.INFO)
+#logging.getLogger('lerc_control.collect').setLevel(logging.INFO)
 
 logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
@@ -140,6 +140,9 @@ def main():
     if args.check:
         command = ls.get_command(args.check)
         print(command)
+        if command.status == 'ERROR':
+            print("ERROR Report:")
+            pprint.pprint(command.get_error_report, indent=5)
         sys.exit()
     elif args.get:
         command = ls.get_command(args.get)
