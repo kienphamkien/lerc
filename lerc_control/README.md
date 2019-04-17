@@ -56,7 +56,7 @@ The following are default values that can be overriden:
 
     [default_collect]
     # Browsing history
-    browserHV_path=tools/BrowsingHistoryView.exe    
+    browser_history_exe_path=tools/BrowsingHistoryView.exe    
     browserHistoryView_cmd=BrowsingHistoryView.exe /sort 2 /HistorySource 1 /VisitTimeFilterType 1 /scomma browserhistory.csv
     # see what processes have a handle on a specific file/directory, or '-a' to get handles for all running processs
     handles_file_cmd=handle.exe /accepteula "{}"
