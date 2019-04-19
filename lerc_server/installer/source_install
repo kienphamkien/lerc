@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# 
+# this scripts configures a source installation of the
+# Live Endpoint Response Client (LERC) Server
+#
+
+# check proxy situation
+# TODO maybe allow user to type username/password?
+echo "checking internet access..."
+if ! curl -m 5 'http://www.google.com' > /dev/null 2>&1
+then
+    echo "unable to connect to google -- do you need to configure a proxy?"
+    echo "set your http_proxy, https_proxy and ftp_proxy environment variables and try again"
+    if [ -e /etc/lsb-release ]; then echo "you may also need to configure apt for a proxy"; fi
+    exit 1
+fi
+
+# install the required packages
+echo "installing required packages..."
+sudo apt-get -y install \
+    python3-pip \
+    apache2 apache2-dev \
+    libapache2-mod-wsgi-py3 \
+    mysql-server || fail "package installation failed"
+#sudo -E installer/install_packages.sh || fail "package installation failed"
+sudo -H -E python3 -m pip install -r installer/requirements-3.6.txt -U || fail "python3.6 package installation failed"
+
+# Creating required directories
+source installer/common.sh
+create_lerc_dirs
+
+#Create server config file
+if [ ! -e etc/lerc_server.ini ]; then cp -a etc/examples/example_lerc_config.ini etc/lerc_server.ini || fail "unable to configure lerc_server.ini"; fi
+
+echo "configuring database..."
+sudo mysql < installer/sql/schema.sql
+echo "Do you wish specify the default client group/company name? The default is 'default'."
+company_name=default
+select cname in Yes No; do
+        case ${cname} in
+                Yes ) read -p "Enter the name: " company_name ; break ;;
+                No ) break ;;
+        esac
+done
+echo $company_name > .company_name.sed
+sed -i -e 's;^;s/DEFAULT_COMPANY_NAME/;' -e 's;$;/g;' .company_name.sed
+sed -f .company_name.sed installer/sql/company.sql > installer/sql/company.exec.sql
+rm .company_name.sed
+sudo mysql < installer/sql/company.exec.sql && rm installer/sql/company.exec.sql
+echo "Set default company name to '$company_name'."
+
+echo "Generate random password for LERC DB user or supply your own?"
+select sqlpw in Generate Supply; do
+	case $sqlpw in
+		Generate ) pswd=$(tr -cd '[:alnum:]' < /dev/urandom | fold -w14 | head -n1); break ;;
+		Supply ) read -p "Enter password: " -s pswd ; echo ;
+			read -p "Confirm password: " -s confirm_pw ; echo ;
+			if [ "$pswd" != "$confirm_pw" ]
+			then
+				echo "Passwords do not match. Try again."
+				exit 1
+			fi
+			break ;;
+	esac
+done
+
+echo $pswd > .mysql.password.sed ;
+sed -i -e 's;^;s/LERC_DB_USER_PASSWORD/;' -e 's;$;/g;' .mysql.password.sed
+sed -f .mysql.password.sed installer/sql/user.sql > installer/sql/user.exec.sql
+rm .mysql.password.sed
+sudo mysql < installer/sql/user.exec.sql && rm installer/sql/user.exec.sql
+echo "LERC Server DB user created."
+echo "Database configuration complete."
+
+echo $pswd > .dbuserpass.sed 
+sed -i -e 's;^;s/^dbuserpass=.*/dbuserpass=;' -e 's;$;/g;' .dbuserpass.sed
+sed -i -f .dbuserpass.sed etc/lerc_server.ini
+rm .dbuserpass.sed
+echo "Updated server config."
+
+# create our ssl certs
+./installer/install_ssl_certs.sh
+
+# Configure Apache
+./installer/install_apache.sh
