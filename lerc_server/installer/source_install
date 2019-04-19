@@ -18,12 +18,19 @@ fi
 # install the required packages
 echo "installing required packages..."
 sudo apt-get -y install \
+    python3-pip \
+    apache2 apache2-dev \
+    libapache2-mod-wsgi-py3 \
     mysql-server || fail "package installation failed"
 #sudo -E installer/install_packages.sh || fail "package installation failed"
-#sudo -H -E python3 -m pip install -r installer/requirements-3.6.txt -U || fail "python3.6 package installation failed"
+sudo -H -E python3 -m pip install -r installer/requirements-3.6.txt -U || fail "python3.6 package installation failed"
+
+# Creating required directories
+source installer/common.sh
+create_lerc_dirs
 
 #Create server config file
-if [ ! -e etc/lerc_server.ini ]; then cp -a etc/example_lerc_config.ini etc/lerc_server.ini || fail "unable to configure lerc_server.ini"; fi
+if [ ! -e etc/lerc_server.ini ]; then cp -a etc/examples/example_lerc_config.ini etc/lerc_server.ini || fail "unable to configure lerc_server.ini"; fi
 
 echo "configuring database..."
 sudo mysql < installer/sql/schema.sql
@@ -71,3 +78,8 @@ sed -i -f .dbuserpass.sed etc/lerc_server.ini
 rm .dbuserpass.sed
 echo "Updated server config."
 
+# create our ssl certs
+./installer/install_ssl_certs.sh
+
+# Configure Apache
+./installer/install_apache.sh

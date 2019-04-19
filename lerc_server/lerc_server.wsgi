@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+# XXX Maybe make this app run out of a virtal env and then use the following?
+#/usr/bin/env python
 #activate_this = '/opt/lerc_server/lercenv/bin/activate_this.py'
 #with open(activate_this) as file_:
 #    exec(file_.read(), dict(__file__=activate_this))
