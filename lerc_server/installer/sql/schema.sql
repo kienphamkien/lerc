@@ -8,4 +8,4 @@ CREATE UNIQUE INDEX host_x ON clients(hostname);
 
 CREATE TABLE company_mapping (name VARCHAR(128), id INT(11) NOT NULL AUTO_INCREMENT, PRIMARY KEY (id));
 
-CREATE TABLE commands (hostname VARCHAR(40), operation enum('RUN','DOWNLOAD','UPLOAD','QUIT'), command VARCHAR(1024), client_id INT(11), command_id INT(11) NOT NULL AUTO_INCREMENT, file_position INT DEFAULT 0, filesize BIGINT DEFAULT 0, client_file_path VARCHAR(1024), server_file_path VARCHAR(1024), status enum('PENDING','COMPLETE','UNKNOWN','ERROR','PREPARING', 'STARTED'), log_file_path VARCHAR(1024), analyst_file_path VARCHAR(1024), PRIMARY KEY (command_id));
+CREATE TABLE commands (hostname VARCHAR(40), operation enum('RUN','DOWNLOAD','UPLOAD','QUIT'), command VARCHAR(1024), client_id INT(11), command_id INT(11) NOT NULL AUTO_INCREMENT, file_position INT DEFAULT 0, filesize BIGINT DEFAULT 0, client_file_path VARCHAR(1024), server_file_path VARCHAR(1024), status enum('PENDING','COMPLETE','UNKNOWN','ERROR','PREPARING', 'STARTED'), log_file_path VARCHAR(1024), analyst_file_path VARCHAR(1024), PRIMARY KEY (command_id), async_run TINYINT(1));
