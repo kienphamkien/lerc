@@ -26,6 +26,10 @@ rm .lerc_server_cn.sed
 sed -e 's;^;s/LERC_CLIENT_CERT_ID/;' -e 's;$;/g;' ssl/.lerc_client_cn.txt > .lerc_client_cn.sed
 sed -i -f .lerc_client_cn.sed etc/lerc.conf
 rm .lerc_client_cn.sed
+# LERC_ADMIN_CERT_ID
+sed -e 's;^;s/LERC_ADMIN_CERT_ID/;' -e 's;$;/g;' ssl/.lerc_control_admin_cn.txt > .lerc_control_admin_cn.sed
+sed -i -f .lerc_control_admin_cn.sed etc/lerc.conf
+rm .lerc_control_admin_cn.sed
 
 sudo ln -s /opt/lerc/lerc_server/etc/lerc.conf /etc/apache2/sites-available/lerc.conf && \
 sudo a2ensite lerc && \
