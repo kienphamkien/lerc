@@ -99,10 +99,10 @@ echo $lerc_client_cn > ssl/.lerc_client_cn.txt
 (
     cd ssl/root/ca && \
     cat intermediate/openssl.cnf > intermediate/openssl.temp.cnf && \
-    echo 'DNS.1 = lerc.client' >> intermediate/openssl.temp.cnf && \
+    echo "DNS.1 = ${lerc_client_cn}" >> intermediate/openssl.temp.cnf && \
     openssl genrsa -out intermediate/private/lerc.client.key.pem 2048 && \
     chmod 400 intermediate/private/lerc.client.key.pem && \
-    openssl req -config intermediate/openssl.temp.cnf -key intermediate/private/lerc.client.key.pem -new -sha256 -out intermediate/csr/lerc.client.csr.pem -subj '/C=US/OU=Security/CN=lerc.client/emailAddress=support@integraldefense.com' && \
+    openssl req -config intermediate/openssl.temp.cnf -key intermediate/private/lerc.client.key.pem -new -sha256 -out intermediate/csr/lerc.client.csr.pem -subj "/C=US/OU=Security/CN=${lerc_client_cn}/emailAddress=support@integraldefense.com" && \
     openssl ca -passin file:.intermediate_ca.pwd -batch -config intermediate/openssl.temp.cnf -extensions usr_cert -days 3649 -notext -md sha256 -in intermediate/csr/lerc.client.csr.pem -out intermediate/certs/lerc.client.cert.pem && \
     chmod 444 intermediate/certs/lerc.client.cert.pem && \
     openssl pkcs12 -export -out intermediate/certs/lerc.client.pfx -inkey intermediate/private/lerc.client.key.pem -in intermediate/certs/lerc.client.cert.pem -certfile intermediate/certs/ca-chain.cert.pem -passout pass: 
@@ -118,3 +118,28 @@ echo $lerc_client_cn > ssl/.lerc_client_cn.txt
 ) || { echo "unable to create symlinks for LERC client certs"; exit 1; }
 
 echo "Client will need the generated ssl/client/lerc.client.pfx and the ca-chain copy at ssl/client/lerc.ca.pem in the clients home dir."
+
+
+# Make admin cert 
+echo "Creating LERC Control admin cert.."
+# XXX Allow user to specify name of cert?
+lerc_control_admin_cn='lerc.control.admin'
+echo $lerc_control_admin_cn > ssl/.lerc_control_admin_cn.txt
+(
+    cd ssl/root/ca && \
+    cat intermediate/openssl.cnf > intermediate/openssl.temp.cnf && \
+    echo "DNS.1 = ${lerc_control_admin_cn}"  >> intermediate/openssl.temp.cnf && \
+    openssl genrsa -out intermediate/private/lerc.control.key.pem 2048 && \
+    chmod 400 intermediate/private/lerc.control.key.pem && \
+    openssl req -config intermediate/openssl.temp.cnf -key intermediate/private/lerc.control.key.pem -new -sha256 -out intermediate/csr/lerc.control.csr.pem -subj "/C=US/OU=Security/CN=${lerc_control_admin_cn}/emailAddress=support@integraldefense.com" && \
+    openssl ca -passin file:.intermediate_ca.pwd -batch -config intermediate/openssl.temp.cnf -extensions usr_cert -days 3649 -notext -md sha256 -in intermediate/csr/lerc.control.csr.pem -out intermediate/certs/lerc.control.cert.pem && \
+    chmod 444 intermediate/certs/lerc.control.cert.pem
+) || { echo "unable to create SSL certificate for LERC clients"; exit 1; }
+
+# Symlink convenience
+(cd ssl && rm -rf admin && mkdir admin )
+(
+    cd ssl && \
+    ln -s ../root/ca/intermediate/private/lerc.control.key.pem admin/. && \
+    ln -s ../root/ca/intermediate/certs/lerc.control.cert.pem admin/.
+) || { echo "unable to create symlinks for analyst admin certs"; exit 1; }
