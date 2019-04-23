@@ -83,3 +83,12 @@ echo "Updated server config."
 
 # Configure Apache
 ./installer/install_apache.sh
+
+# CRON jobs: host maintenance and server cleanup routines
+crontab -l > .lerc.cron
+echo "* * * * * /opt/lerc/lerc_server/host_status_maintainer.py" >> .lerc.cron
+crontab .lerc.cron
+rm .lerc.cron
+
+# Log rotation
+sudo cp etc/examples/log-rotation.example /etc/logrotate.d/lerc_server 

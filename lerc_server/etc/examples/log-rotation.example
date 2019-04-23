@@ -1,0 +1,23 @@
+/opt/lerc/lerc_server/logs/server.log {
+    daily
+    missingok
+    rotate 24
+    notifempty
+    su lerc lerc
+    create 0640 lerc lerc
+    postrotate
+        service apache2 reload
+    endscript
+}
+
+/opt/lerc/lerc_server/logs/host_status.log {
+    daily
+    missingok
+    rotate 24
+    notifempty
+    su lerc lerc
+    create 0640 lerc lerc
+    postrotate
+        service apache2 reload
+    endscript
+}
