@@ -5,6 +5,7 @@ sudo a2enmod ssl
 sudo a2ensite default-ssl
 sudo a2enmod wsgi
 sudo a2dissite default-ssl.conf
+sudo a2dissite 000-default.conf
 
 echo "Running the LERC Server with one interface or two? Choose one if you don't know what you want."
 echo " -- One Interface: Both the LERC clients and analysts (control API) will access this server on the same interface."

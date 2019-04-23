@@ -17,6 +17,7 @@ fi
 
 # install the required packages
 echo "installing required packages..."
+sudo apt-get update
 sudo apt-get -y install \
     python3-pip \
     apache2 apache2-dev \
@@ -85,10 +86,19 @@ echo "Updated server config."
 ./installer/install_apache.sh
 
 # CRON jobs: host maintenance and server cleanup routines
+echo "Creating CRON jobs.."
 crontab -l > .lerc.cron
 echo "* * * * * /opt/lerc/lerc_server/host_status_maintainer.py" >> .lerc.cron
 crontab .lerc.cron
 rm .lerc.cron
 
 # Log rotation
+echo "Setting up log rotation.."
 sudo cp etc/examples/log-rotation.example /etc/logrotate.d/lerc_server 
+
+# LERC Control from source
+echo "Installing LERC Control from source and configuring for local use.."
+./installer/install_lerc_control_source.sh
+
+echo "Done with LERC server installation."
+
