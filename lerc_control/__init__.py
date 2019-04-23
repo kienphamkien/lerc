@@ -28,7 +28,7 @@ coloredlogs.install(level='INFO', logger=logger)
 try:
     from lerc_control import deploy_lerc
 except:
-    logger.debug("Failed to import deploy_lerc")
+    pass
 
 def main():
 

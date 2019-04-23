@@ -35,7 +35,8 @@ try:
     from cbapi.response import *
     from cbapi.errors import ApiError, ObjectNotFoundError, TimeoutError
 except:
-    logging.error("cbapi is not installed")
+    pass
+    #logging.debug("cbapi is not installed")
     sys.exit(1)
 
 HOME_DIR = os.path.dirname(os.path.realpath(__file__)) 
