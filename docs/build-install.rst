@@ -2,143 +2,76 @@
 Server Installation
 ===================
 
-#. Start with a clean Ubuntu 18 LTS Server install.
+#. Start with a clean Ubuntu 18 LTS Server install
+
+#. Git the lerc files in `/opt/`::
+
+    cd /opt && sudo -E git clone https://github.com/IntegralDefense/lerc.git
 
 #. Create lerc user::
 
     sudo adduser lerc
 
-#. Git the lerc files in `/opt/`::
+#. Give the lerc user sudo::
 
-    cd /opt && sudo -E git clone https://github.com/seanmcfeely/lerc.git
+    sudo adduser lerc sudo
 
-#. Edit your ``/opt/lerc/lerc_server/etc/lerc_server.conf`` file for your environment.
+#. Give lerc full access to `/opt/lerc`::
 
-  The lerc_server.conf is pre-configured to work on multiple interfaces, where one interface is internal and one is externally facing. If you are standing up the lerc server to work on one interface then you can remove the first VirtualHost entry entirely.
+    cd /opt && sudo chown -R lerc:lerc lerc
 
-  The lerc_server.conf Apache configuration file that is included with lerc by default needs to have a few things for it to be completed. First, you must specifiy the server name(s) and paths to your certificate files. Below is an example configuration::
+#. Become the lerc user::
 
-    <VirtualHost 0.0.0.0:443>
-        ServerName lerc.local
-        SSLEngine On
-        SSLVerifyDepth 2
-        SSLCertificateFile /opt/lerc/lerc_server/etc/ssl/lerc.local.public.cert.pem
-        SSLCertificateKeyFile /opt/lerc/lerc_server/etc/ssl/lerc.local.private.key.pem
-        SSLCertificateChainFile /opt/lerc/lerc_server/etc/ssl/ca-chain.cert.pem
-        SSLCACertificateFile /opt/lerc/lerc_server/etc/ssl/ca-chain.cert.pem
+    sudo su lerc
 
-        WSGIDaemonProcess control_server user=lerc group=lerc threads=2
-        WSGIScriptAlias / /opt/lerc/lerc_server/lerc_server.wsgi
-        WSGIChunkedRequest On
+#. Run the install script::
 
-        <Directory /opt/lerc/lerc_server/>
-            WSGIProcessGroup lerc_server
-            WSGIApplicationGroup %{GLOBAL}
-            WSGIScriptReloading On
-            Allow from all
-            Require all granted
-            #Deny from all
-            #Allow from 10.1.1.0/24
-            SSLVerifyClient require
-            SSLRequire %{SSL_CLIENT_S_DN_CN} eq "lerc.control.api.admin.whatever"
-        </Directory>
-    </VirtualHost>
+    cd /opt/lerc/lerc_server && installer/source_install
 
-    <VirtualHost 0.0.0.0:443>
-        ServerName lerc.example.com
-        SSLEngine On
-        SSLVerifyDepth 2
-        SSLCertificateFile /opt/lerc/lerc_server/etc/ssl/lerc.example.com.cert.pem
-        SSLCertificateKeyFile /opt/lerc/lerc_server/etc/ssl/lerc.example.private.key.pem
-        SSLCertificateChainFile /opt/lerc/lerc_server/etc/ssl/ca-chain.cert.pem
-        SSLCACertificateFile /opt/lerc/lerc_server/etc/ssl/ca-chain.cert.pem
+#. Chose to either change the default LERC Client group/company name or use the 'default' name::
 
-        WSGIDaemonProcess server user=lerc group=lerc threads=5
-        WSGIScriptAlias / /opt/lerc/lerc_server/lerc_server.wsgi
-        WSGIChunkedRequest On
+    Do you wish specify the default client group/company name? The default is 'default'.
+    1) Yes
+    2) No 
 
-        <Directory /opt/lerc/lerc_server/>
-            WSGIProcessGroup server
-            WSGIApplicationGroup %{GLOBAL}
-            WSGIScriptReloading On
-            Allow from all
-            Require all granted
-            SSLVerifyClient require
-            SSLRequire %{SSL_CLIENT_S_DN_CN} eq "whatever.you.name.the.client.cert"
-        </Directory>
-        <Location /command>
-            Order allow,deny
-            Deny from all
-            #SSLVerifyClient require
-            #SSLRequire %{SSL_CLIENT_S_DN_CN} eq "probably.not.a.good.idea"
-        </Location>
-        SetEnv nokeepalive ssl-unclean-shutdown
-    </VirtualHost>
+#. Either supply a password for the MySQL DB or let the install script generate one::
 
-#. Place your certificates at the paths specified in the config file above.
+    Generate random password for LERC DB user or supply your own?
+    1) Generate
+    2) Supply
 
-#. Set up your database.
+#. Decide how you want to run the LERC server::
 
-   Edit the ``/opt/lerc/lerc_server/etc/schema.sql`` file.
+    Running the LERC Server with one interface or two? Choose one if you don't know what you want.
+     -- One Interface: Both the LERC clients and analysts (control API) will access this server on the same interface.
+     -- Two Interfaces: LERC Clients and analysts (control API) will access their features via different interfaces.
+    Choose which interface configuration you want:
+    1) One
+    2) Two
 
-     1. If you have more that one environment/comany, then duplicate the following line however many times you need to::
+After that completes your LERC server should be running and ready. As part of the installation, LERC Client and LERC Control certificates were generated and placed in the following locations.
 
-            INSERT INTO company_mapping SET name='<your organization/company/group name>';
+Client::
 
-     2. Change the "`password`" in the following command to something unique::
+    /opt/lerc/lerc_server/ssl/client/
 
-            GRANT ALL PRIVILEGES ON lerc . * TO 'lerc_user'@'localhost' IDENTIFIED BY 'password';
+Control::
 
-   Next, import the ``schema.sql`` file to configure mysql for lerc::
+    /opt/lerc/lerc_server/ssl/admin/
 
-         sudo mysql < /opt/lerc/lerc_server/etc/schema.sql
+These certificate files, and the `/opt/lerc/lerc_server/ssl/ca-chain.cert.pem` will be needed to configure the LERC Control and LERC Clients.
 
-#. Create this file ``/opt/lerc/lerc_server/etc/lerc_server.ini`` with the following defaults and supply the password you created above to the ``dbuserpass`` variable::
+As an additional security measure, you can safely remove the `lerc` user from the sudoers file after installation.
 
-    [lerc_server]
-    ; How many seconds a client will sleep before fetching 
-    default_client_sleep=60
-    chunk_size=8192
-    ; if not specified by the analyst, the default location
-    ; lerc.exe will write files
-    default_client_dir=C:\Program Files (x86)\Integral Defense\
-    dbserver=localhost
-    dbuser=lerc_user
-    dbuserpass=<fille me in>
+===============
+LERClient Setup
+===============
 
-#. Give lerc full permissions over ``/opt/lerc/``::
+If you want to build your own client version, feel free. Otherwise, there is a LERC.zip file included in the project repo that contains everything you need to start. 
 
-    sudo chown -R lerc:lerc lerc
+Download the LERC.zip file and extract it. Then, copy the client certificats that were generated by the server installation into that same directory. Next, edit the config.txt file so that the 'serverurls' variable reflects your LERC server. For example::
 
-#. Create a symlink from your configuration file to ``/etc/apache2/sites-available``. Example::
+    serverurls: https://3.214.24.217/
 
-    cd /etc/apache2/sites-available && sudo ln -s /opt/lerc/lerc_server/etc/lerc_server.conf
-
-#. Enable the apache ssl module and the lerc server site you symlinked to::
-
-    sudo a2enmod ssl && sudo a2ensite lerc_server.conf
-
-#. Reload Apache2::
-
-    sudo service apache2 reload
-
-Log Rotation
-------------
-
-You can configure logrotate to perform log rotation on the lerc server logs located at ``/opt/lerc/lerc_server/logs/server.log``.
-
-All you need to do is create the following file ``/etc/logrotate.d/lerc_server`` and give it these contents::
-
-    /opt/lerc/lerc_server/logs/server.log {
-        daily
-        missingok
-        rotate 24
-        notifempty
-        su cybersecurity cybersecurity
-        create 0640 cybersecurity cybersecurity
-        postrotate
-            service apache2 reload
-        endscript
-    }
-
+Run lerc.exe and `tail -f /opt/lerc/lerc_server/logs/server.log` to see the client fetch.
 

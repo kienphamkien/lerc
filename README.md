@@ -13,7 +13,7 @@ The Live Endpoint Response Client (LERC) acts as a remote access solution but wa
 
 ## Getting Started
 
-You will need to do stuff.
+Start with the server installation. Check out the lerc_control server github page for the README install instructions, yo.
 
 ## Project Breakdown
 

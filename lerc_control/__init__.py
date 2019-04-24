@@ -7,7 +7,7 @@ import argparse
 import logging
 import coloredlogs
 import pprint
-from lerc_control import lerc_api, collect, deploy_lerc
+from lerc_control import lerc_api, collect
 from lerc_control.scripted import execute_script
 from lerc_control.helpers import TablePrinter
 
@@ -25,6 +25,10 @@ logging.getLogger('lerc_control').setLevel(logging.INFO)
 logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
 
+try:
+    from lerc_control import deploy_lerc
+except:
+    pass
 
 def main():
 
