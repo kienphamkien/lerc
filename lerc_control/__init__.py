@@ -146,7 +146,7 @@ def main():
         print(command)
         if command.status == 'ERROR':
             print("ERROR Report:")
-            pprint.pprint(command.get_error_report, indent=5)
+            pprint.pprint(command.get_error_report(), indent=5)
         sys.exit()
     elif args.get:
         command = ls.get_command(args.get)
