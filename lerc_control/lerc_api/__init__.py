@@ -436,7 +436,7 @@ class Command():
             if 'commands' in r and len(r['commands']) == 1:
                 cmd_dict = r['commands'][0]
             else:
-                self.logger.warn("No command by id:{}".format(self.id))
+                self.logger.warning("No command by id:{}".format(self.id))
                 return False
         self.status = cmd_dict['status']
         self.file_position = cmd_dict['file_position']
@@ -476,7 +476,6 @@ class Command():
         self.refresh(cmd_dict=r)
         return True
 
-    @property
     def get_error_report(self):
         """If an error report exists for this command, get it.
         """
@@ -509,7 +508,7 @@ class Command():
         # Proceed only if the server reports it has results
         r = requests.get(self._ls.server+'/command/download', cert=self._ls.cert, params={'result': self.server_file_path}).json()
         if 'error' in r:
-            self.logger.warn("{}".format(r['error']))
+            self.logger.warning("{}".format(r['error']))
             return False
 
         if chunk_size:
@@ -532,7 +531,7 @@ class Command():
         headers = {"Accept-Encoding": '0'}
 
         if self.status != 'COMPLETE' and self.status != 'STARTED':
-            self.logger.warn("Any results for commands in state={} can not be reliably streamed.".format(self.status))
+            self.logger.warning("Any results for commands in state={} can not be reliably streamed.".format(self.status))
             return requests.get(self._ls.server+'/command/download', cert=self._ls.cert, params=arguments).json()
 
         raw_bytes = None
@@ -583,7 +582,7 @@ class Command():
             tmp_client = self._ls.get_client(self.client_id)
             #if tmp_client.status != 'ONLINE' and tmp_client.status != 'BUSY':
             if not tmp_client.is_online and not tmp_client.is_busy:
-                self.logger.warn("This command's LERC ({} (ID:{})) has gone to a status of '{}'".format(self.hostname, self.client_id, tmp_client.status))
+                self.logger.warning("This command's LERC ({} (ID:{})) has gone to a status of '{}'".format(self.hostname, self.client_id, tmp_client.status))
             if self.status == 'PENDING': # we wait
                 self.logger.info("Command {} PENDING. Checking again in 10 seconds..".format(self.id))
                 time.sleep(10)
@@ -606,8 +605,8 @@ class Command():
             else: # Only here if command in UNKNOWN or ERROR state
                 self.logger.info("Command {} state: {}.".format(self.id, self.status))
                 if self.status == 'ERROR':
-                    err = self.get_error_report
-                    self.logger.warn("Error message for command={} : {}".format(self.id, err['error']))
+                    err = self.get_error_report()
+                    self.logger.warning("Error message for command={} : {}".format(self.id, err['error']))
                 return None
 
 
@@ -680,7 +679,7 @@ class lerc_session():
         keys = kwargs.keys()
         valid_keys = [key for key in keys if key in valid_fields]
         if len(valid_keys) <= 0:
-            self.logger.warn("None of {} are valid query fileds.".format(keys))
+            self.logger.warning("None of {} are valid query fileds.".format(keys))
             return False
 
         # If cmd keys were passed, assume it's ok to set the return commands arg
@@ -711,7 +710,7 @@ class lerc_session():
         # querying by command id should always return a single command
         if 'commands' in r and len(r['commands']) == 1:
             return r['commands'][0]
-        self.logger.warn("No command result for {} : {}".format(cid, r))
+        self.logger.warning("No command result for {} : {}".format(cid, r))
         return False
 
     def get_host(self, hostname):
