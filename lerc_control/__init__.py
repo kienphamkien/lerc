@@ -33,8 +33,11 @@ except:
 def main():
 
     parser = argparse.ArgumentParser(description="User interface to the LERC control server")
-    #parser.add_argument('-h', '--hostname', help="the host you'd like to work with")
-    parser.add_argument('-e', '--environment', action="store", help="specify an environment to work with. Default='default'")
+    # LERC environment choices
+    config = lerc_api.load_config()
+    env_choices = [ sec for sec in config.sections() if config.has_option(sec, 'server') ]
+    parser.add_argument('-e', '--environment', action="store", default='default', 
+                        help="specify an environment to work with. Default='default'", choices=env_choices)
     parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG")
     parser.add_argument('-c', '--check', action="store", help="check on a specific command id")
     parser.add_argument('-r', '--resume', action='store', help="resume a pending command id") 
@@ -89,6 +92,9 @@ def main():
         logging.getLogger('lerc_control').setLevel(logging.DEBUG)
         coloredlogs.install(level='DEBUG', logger=logger)
 
+    # a local lerc_session will be needed to go any further
+    ls = lerc_api.lerc_session(profile=args.environment)
+
     if args.instruction == 'query':
         if args.query == 'fields':
             print("\nAvailable query fields:\n")
@@ -102,7 +108,6 @@ def main():
             print() 
             sys.exit()
         query = lerc_api.parse_lerc_server_query(args.query)
-        ls = lerc_api.lerc_session()
         if args.return_commands: 
             query['rc'] = True
         results = ls.query(**query)
@@ -136,9 +141,6 @@ def main():
             #    print(cmd)
             print() 
         sys.exit()
-
-    # a local lerc_session will be needed to go any further
-    ls = lerc_api.lerc_session()
 
     # root options
     if args.check:

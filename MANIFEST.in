@@ -1,0 +1,5 @@
+include lerc_control/README.md
+recursive-include lerc_control/scripts *.ini
+recursive-include lerc_control/tools *
+recursive-include lerc_control/etc *.ini
+exclude README.md

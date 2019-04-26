@@ -71,16 +71,35 @@ chmod 400 ssl/root/ca/.intermediate_ca.pwd
 
 
 # create the SSL certificates for localhost
-echo "lerc.localhost" > ssl/.lerc_server_cn.txt
-#echo "X.X.X.X" > ssl/.lerc_server_ip.txt
+lerc_server_cn="lerc.localhost"
+echo "Do you wish specify the Common Name for your server certificate? The default is 'lerc.localhost'."
+select cname in Yes No; do
+        case ${cname} in
+                Yes ) read -p "Enter the name: " lerc_server_cn ; break ;;
+                No ) break ;;
+        esac
+done
+echo $lerc_server_cn > ssl/.lerc_server_cn.txt
+
+# Attempt to get the current internet facing IP of this server
+lerc_server_ip=$(curl -s http://whatismyip.akamai.com/)
+echo "The internet IP address of this server appears to be '$lerc_server_ip'"
+echo "Do you wish specify a different IP address for your server certificate?"
+select ipaddr in Yes No; do
+        case ${ipaddr} in
+                Yes ) read -p "Enter the IP: " lerc_server_ip ; break ;;
+                No ) break ;;
+        esac
+done
+echo $lerc_server_ip > ssl/.lerc_server_ip.txt
 (
     cd ssl/root/ca && \
     cat intermediate/openssl.cnf > intermediate/openssl.temp.cnf && \
-    echo 'DNS.1 = lerc.localhost' >> intermediate/openssl.temp.cnf && \
-    echo 'IP.1 = 127.0.0.1' >> intermediate/openssl.temp.cnf && \
+    echo "DNS.1 = ${lerc_server_cn}" >> intermediate/openssl.temp.cnf && \
+    echo "IP.1 = ${lerc_server_ip}" >> intermediate/openssl.temp.cnf && \
     openssl genrsa -out intermediate/private/localhost.key.pem 2048 && \
     chmod 400 intermediate/private/localhost.key.pem && \
-    openssl req -config intermediate/openssl.temp.cnf -key intermediate/private/localhost.key.pem -new -sha256 -out intermediate/csr/localhost.csr.pem -subj '/C=US/ST=KY/L=Covington/O=Integral/OU=Security/CN=lerc.localhost/emailAddress=lerc@localhost' && \
+    openssl req -config intermediate/openssl.temp.cnf -key intermediate/private/localhost.key.pem -new -sha256 -out intermediate/csr/localhost.csr.pem -subj "/C=US/ST=KY/L=Covington/O=Integral/OU=Security/CN=${lerc_server_cn}/emailAddress=lerc@localhost" && \
     openssl ca -passin file:.intermediate_ca.pwd -batch -config intermediate/openssl.temp.cnf -extensions server_cert -days 3649 -notext -md sha256 -in intermediate/csr/localhost.csr.pem -out intermediate/certs/localhost.cert.pem
     chmod 444 intermediate/certs/localhost.cert.pem
 ) || { echo "unable to create SSL certificate for localhost"; exit 1; }
