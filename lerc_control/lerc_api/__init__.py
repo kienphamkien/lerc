@@ -151,6 +151,7 @@ class Client():
         self.last_activity = host_dict['last_activity']
         self.install_date = host_dict['install_date']
         self._raw = host_dict
+        self.profile = profile
         self._lerc_session = lerc_session(profile=profile)
 
     @property
@@ -229,7 +230,7 @@ class Client():
             result = r.json()
             if 'command' in result:
                 self.logger.info("{} (CID: {})".format(result['message'], result['command']['command_id']))
-                return Command(result['command'])
+                return Command(result['command'], profile=self.profile)
             else:
                 if 'error' not in result:
                     raise Exception("Unexpected result: {}".format(result))
@@ -692,9 +693,9 @@ class lerc_session():
         r = requests.get(self.server+'/query', cert=self.cert, params=kwargs).json()
         results = {}
         if 'clients' in r:
-            results['clients'] = [Client(c) for c in r['clients']]
+            results['clients'] = [Client(c, profile=self.profile) for c in r['clients']]
             if 'commands' in r:
-                results['commands'] = [Command(c) for c in r['commands']]
+                results['commands'] = [Command(c, profile=self.profile) for c in r['commands']]
             if 'client_id_list' in r:
                 results['client_id_list'] = r['client_id_list']
             return results
