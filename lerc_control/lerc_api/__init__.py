@@ -550,9 +550,10 @@ class Command():
                 else:
                     with open(file_path, 'ba') as f:
                         for i in range(total_chunks):
+                            data = r.raw.read(self._ls.chunk_size)
                             if self.operation == 'RUN' and print_run:
-                                print(r.raw.read(self._ls.chunk_size).decode('utf-8'))
-                            f.write(r.raw.read(self._ls.chunk_size))
+                                print(data.decode('utf-8'))
+                            f.write(data)
                         final_chunk = r.raw.read(remaining_bytes)
                         if self.operation == 'RUN' and print_run:
                             print(final_chunk.decode('utf-8'))
