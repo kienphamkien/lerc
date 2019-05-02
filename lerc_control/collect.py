@@ -25,15 +25,14 @@ def get_directory(lerc, dir_path):
         return False
 
     config = lerc._ls.get_config
-    required_keys=['7za_path', '7za_dir_cmd', 'client_working_dir']
+    required_keys=['7za_path', '7za_dir_cmd']
     if not lerc_api.check_config(config, required_keys=required_keys):
         logger.error("^ Missing required config items")
         return False
     profile = lerc._ls.profile
     section = profile + "_collect"
-    _7za_path = config[section]['7za_path']
-    _7za_cmd = config[section]['7za_dir_cmd']
-    default_client_dir = config[profile]['client_working_dir']
+    _7za_path = config[section]['7za_path'] if config.has_option(section, '7za_path') else config['default_collect']['7za_path']
+    _7za_cmd = config[section]['7za_dir_cmd'] if config.has_option(section, '7za_dir_cmd') else config['default_collect']['7za_dir_cmd']
 
     if not os.path.exists(_7za_path):
         if _7za_path[0] == '/':
@@ -54,14 +53,14 @@ def get_directory(lerc, dir_path):
     logger.info("Issued CID={} to run 7za on '{}'".format(cmd.id, dir_path))
     commands.append(cmd)
 
-    outputfile = default_client_dir + '{}_dirOfInterest.7z'.format(lerc.hostname)
+    outputfile = '{}_dirOfInterest.7z'.format(lerc.hostname)
     upCmd = lerc.Upload(outputfile)
     logger.info("Issued CID={} to upload {}_dirOfInterest.7z".format(upCmd.id, lerc.hostname))
     logger.info("Waiting for the upload command to reach completion ... ")
     commands.append(upCmd.wait_for_completion())
 
     cmd = lerc.Run('Del "{}" && Del 7za.exe'.format(outputfile))
-    logger.info("Issued CID={} to to delete '{}' and 7za.exe".format(cmd.id, lerc.hostname))
+    logger.info("Issued CID={} to to delete '{}' and 7za.exe".format(cmd.id, outputfile))
     commands.append(cmd)
 
     logger.info("Getting result from the control server..".format(lerc.hostname))

@@ -163,6 +163,9 @@ def command_manager(host, remove_cid=None):
                 filename = command.client_file_path
                 filename = filename[filename.rfind('\\')+1:]
                 command.server_file_path = "{}{}_{}_{}".format(DATA_DIR, command.hostname, command.command_id, filename)
+                # add DEFAULT_CLIENT_DIR if it appears a path is not supplied
+                if '\\' not in command.client_file_path:
+                    command.client_file_path = DEFAULT_CLIENT_DIR + command.client_file_path
                 db.session.commit()
             elif os.path.exists(os.path.join(BASE_DIR,command.server_file_path)):
                 # handling edge case where db didn't get updated correctly after data transfer

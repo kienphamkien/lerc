@@ -51,7 +51,7 @@ def execute_script(lerc, script_path):
 
     config = lerc._ls.get_config
     profile = lerc._ls.profile
-    default_client_dir = config[profile]['client_working_dir']
+    #default_client_dir = config[profile]['client_working_dir']
 
     script = ConfigParser()
     if not os.path.exists(script_path):
@@ -120,8 +120,8 @@ def execute_script(lerc, script_path):
         elif op == 'UPLOAD':
             path = script[command]['path']
             # if the script doesn't specify the full path, add default client working dir
-            if '\\' not in path:
-                path = default_client_dir + path
+            #if '\\' not in path:
+                #path = default_client_dir + path
             cmd = lerc.Upload(path)
             command_history[command] = cmd
             command_history[command].get_the_results = get_results
