@@ -10,6 +10,8 @@ from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
 
+# Get the working lerc_control directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def check_config(config, required_keys):
     """Just make sure the keys show up somewhere in the config - Not a fool-proof check
@@ -50,8 +52,6 @@ def load_config(profile='default', required_keys=[]):
     logger = logging.getLogger(__name__+".load_config")
     config = ConfigParser()
     config_paths = []
-    # Get the working lerc_control directory
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # default
     config_paths.append(os.path.join(BASE_DIR, 'etc', 'lerc.ini'))
     # global
@@ -331,6 +331,11 @@ class Client():
         self.logger.info("containing host..")
         self.refresh()
         safe_contain_bat_path = self._ls.config[self._ls.profile]['containment_bat']
+        if not os.path.exists(safe_contain_bat_path):
+            safe_contain_bat_path = os.path.join(BASE_DIR, safe_contain_bat_path)
+            if not os.path.exists(safe_contain_bat_path):
+                self.logger.error("Containment batch file '{}' does not exist.".format(safe_contain_bat_path))
+                return False
         contain_cmd = self._ls.config[self._ls.profile]['contain_cmd']
 
         self.Download(safe_contain_bat_path)
