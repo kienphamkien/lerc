@@ -10,6 +10,8 @@ from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
 
+# Get the working lerc_control directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def check_config(config, required_keys):
     """Just make sure the keys show up somewhere in the config - Not a fool-proof check
@@ -50,8 +52,6 @@ def load_config(profile='default', required_keys=[]):
     logger = logging.getLogger(__name__+".load_config")
     config = ConfigParser()
     config_paths = []
-    # Get the working lerc_control directory
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # default
     config_paths.append(os.path.join(BASE_DIR, 'etc', 'lerc.ini'))
     # global
@@ -330,8 +330,15 @@ class Client():
 
         self.logger.info("containing host..")
         self.refresh()
-        safe_contain_bat_path = self._ls.config[self._ls.profile]['containment_bat']
-        contain_cmd = self._ls.config[self._ls.profile]['contain_cmd']
+
+        safe_contain_bat_path = self._ls.config[self._ls.profile]['containment_bat'] if self._ls.config.has_option(self._ls.profile,'containment_bat') else self._ls.config['default']['containment_bat']
+        contain_cmd = self._ls.config[self._ls.profile]['contain_cmd'] if self._ls.config.has_option(self._ls.profile, 'contain_cmd') else self._ls.config['default']['contain_cmd']
+
+        if not os.path.exists(safe_contain_bat_path):
+            safe_contain_bat_path = os.path.join(BASE_DIR, safe_contain_bat_path)
+            if not os.path.exists(safe_contain_bat_path):
+                self.logger.error("Containment batch file '{}' does not exist.".format(safe_contain_bat_path))
+                return False
 
         self.Download(safe_contain_bat_path)
         containment_command = self.Run(contain_cmd.format(int(self.sleep_cycle)+5), async=True)
@@ -550,9 +557,10 @@ class Command():
                 else:
                     with open(file_path, 'ba') as f:
                         for i in range(total_chunks):
+                            data = r.raw.read(self._ls.chunk_size)
                             if self.operation == 'RUN' and print_run:
-                                print(r.raw.read(self._ls.chunk_size).decode('utf-8'))
-                            f.write(r.raw.read(self._ls.chunk_size))
+                                print(data.decode('utf-8'))
+                            f.write(data)
                         final_chunk = r.raw.read(remaining_bytes)
                         if self.operation == 'RUN' and print_run:
                             print(final_chunk.decode('utf-8'))
