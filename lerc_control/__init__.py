@@ -85,6 +85,10 @@ def main():
     parser_script.add_argument('-s', '--script-name', help="provide the name of a script to run")
     parser_script.add_argument('-f', '--file-path', help="the path to a custom script you want to execute")
 
+    parser_remediate = subparsers.add_parser('remediate', help="Remediate an infected host")
+    parser_remediate.add_argument('hostname', help="the host you'd like to work with")
+    parser_remediate.add_argument('-f', '--remediation-file', help='the remediation file describing the infection')
+
     args = parser.parse_args()
 
     if args.debug:
@@ -215,6 +219,12 @@ def main():
             logger.error("Didn't find a sensor in CarbonBlack by this hostname")
             sys.exit(0)
  
+    # remediation
+    if args.instruction == 'remediate':
+        from lerc_control.remediate import remediate
+        remediate(client, args.remediation_file)
+        sys.exit(0)
+
     # collections
     profile=args.environment if args.environment else 'default'
     if args.instruction == 'collect':
