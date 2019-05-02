@@ -330,13 +330,15 @@ class Client():
 
         self.logger.info("containing host..")
         self.refresh()
-        safe_contain_bat_path = self._ls.config[self._ls.profile]['containment_bat']
+
+        safe_contain_bat_path = self._ls.config[self._ls.profile]['containment_bat'] if self._ls.config.has_option(self._ls.profile,'containment_bat') else self._ls.config['default']['containment_bat']
+        contain_cmd = self._ls.config[self._ls.profile]['contain_cmd'] if self._ls.config.has_option(self._ls.profile, 'contain_cmd') else self._ls.config['default']['contain_cmd']
+
         if not os.path.exists(safe_contain_bat_path):
             safe_contain_bat_path = os.path.join(BASE_DIR, safe_contain_bat_path)
             if not os.path.exists(safe_contain_bat_path):
                 self.logger.error("Containment batch file '{}' does not exist.".format(safe_contain_bat_path))
                 return False
-        contain_cmd = self._ls.config[self._ls.profile]['contain_cmd']
 
         self.Download(safe_contain_bat_path)
         containment_command = self.Run(contain_cmd.format(int(self.sleep_cycle)+5), async=True)
