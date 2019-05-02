@@ -330,8 +330,17 @@ class Client():
 
         self.logger.info("containing host..")
         self.refresh()
-        safe_contain_bat_path = self._ls.config[self._ls.profile]['containment_bat']
-        contain_cmd = self._ls.config[self._ls.profile]['contain_cmd']
+        safe_contain_bat_path = None
+        contain_cmd = None
+        try:
+            safe_contain_bat_path = self._ls.config[self._ls.profile]['containment_bat']
+        except KeyError as e:
+            # not performing another try because the default config ships with these keys
+            safe_contain_bat_path = self._ls.config['default']['containment_bat']
+        try:
+            contain_cmd = self._ls.config[self._ls.profile]['contain_cmd']
+        except KeyError as e:
+            contain_cmd = self._ls.config['default']['contain_cmd']
 
         self.Download(safe_contain_bat_path)
         containment_command = self.Run(contain_cmd.format(int(self.sleep_cycle)+5), async=True)
