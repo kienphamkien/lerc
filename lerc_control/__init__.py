@@ -11,6 +11,8 @@ from lerc_control import lerc_api, collect
 from lerc_control.scripted import execute_script
 from lerc_control.helpers import TablePrinter
 
+BASE_DIR = os.path.dirname(os.path.realpath(__file__))
+
 # configure logging #
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - [%(levelname)s] %(message)s')
@@ -87,7 +89,14 @@ def main():
 
     parser_remediate = subparsers.add_parser('remediate', help="Remediate an infected host")
     parser_remediate.add_argument('hostname', help="the host you'd like to work with")
+    parser_remediate.add_argument('--write-template', action='store_true', default=False, help='write the remediation template file as remediate.ini')
     parser_remediate.add_argument('-f', '--remediation-file', help='the remediation file describing the infection')
+    parser_remediate.add_argument('-drv', '--delete-registry-value', help='delete a registry value and all its data')
+    parser_remediate.add_argument('-drk', '--delete-registry-key', help='delete all values at a registry key path')
+    parser_remediate.add_argument('-df', '--delete-file', help='delete a file')
+    parser_remediate.add_argument('-kpn', '--kill-process-name', help='kill all processes by this name')
+    parser_remediate.add_argument('-kpid', '--kill-process-id', help='kill process id')
+    parser_remediate.add_argument('-dd', '--delete-directory', help='Delete entire directory')
 
     args = parser.parse_args()
 
@@ -221,8 +230,32 @@ def main():
  
     # remediation
     if args.instruction == 'remediate':
-        from lerc_control.remediate import remediate
-        remediate(client, args.remediation_file)
+        if args.write_template:
+           import shutil
+           shutil.copyfile(os.path.join(BASE_DIR, 'etc', 'example_remediate_routine.ini'), 'remediate.ini')
+           print("Wrote remediate.ini")
+           sys.exit(0)
+        from lerc_control import remediate
+        if args.remediation_file:
+            remediate.Remediate(client, args.remediation_file)
+        if args.kill_process_name:
+            cmd = remediate.kill_process_name(client, args.kill_process_name)
+            remediate.evaluate_remediation_results(cmd, 'process_names', args.kill_process_name)
+        if args.kill_process_id:
+            cmd = remediate.kill_process_id(client, args.kill_process_id)
+            remediate.evaluate_remediation_results(cmd, 'pids', args.kill_process_id)
+        if args.delete_registry_value:
+            cmd = remediate.delete_registry_value(client, args.delete_registry_value)
+            remediate.evaluate_remediation_results(cmd, 'registry_values', args.delete_registry_value)
+        if args.delete_registry_key:
+            cmd = remediate.delete_registry_key(client, args.delete_registry_key)
+            remediate.evaluate_remediation_results(cmd, 'registry_keys', args.delete_registry_key)
+        if args.delete_file:
+            cmd = remediate.delete_file(client, args.delete_file)
+            remediate.evaluate_remediation_results(cmd, 'files', args.delete_file)
+        if args.delete_directory:
+            cmd = remediate.delete_directory(client, args.delete_directory)
+            remediate.evaluate_remediation_results(cmd, 'directories', args.delete_directory)
         sys.exit(0)
 
     # collections
