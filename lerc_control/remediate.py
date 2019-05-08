@@ -25,7 +25,7 @@ def delete_service(client, service_name):
     return False
 
 def delete_scheduled_task(client, task_name):
-    return False
+    return client.Run('schtasks /Delete /TN "{}" /F'.format(task_name))
 
 def delete_directory(client, dir_path):
     cmd = 'cd "{}" && DEL /F /Q /S * > NUL'.format(dir_path)
@@ -95,14 +95,24 @@ def evaluate_remediation_results(cmd, remediation_type, target_value):
         else:
             logger.info("File '{}' deleted successfully.".format(fname))
     elif remediation_type == 'directories': 
-       directory = target_value
-       if cmd.status != 'COMPLETE':
+        directory = target_value
+        if cmd.status != 'COMPLETE':
             error_message = cmd.get_error_report()['error']
             logger.error("Problem deleting directory '{}' : {}".format(directory, cmd.status, error_message))
-       elif results is not None:
+        elif results is not None:
             logger.warn("Problem deleting directory '{}' : {}".format(directory, results.decode('utf-8')))
-       else:
+        else:
             logger.info("Successfully deleted '{}'.".format(directory))
+    elif remediation_type == 'scheduled_tasks':
+        task = target_value
+        results = results.decode('utf-8') if results is not None else None
+        if cmd.status != 'COMPLETE':
+            error_message = cmd.get_error_report()['error']
+            logger.error("Problem deleting scheduled task '{}' : {}: {}".format(task, cmd.status, error_message))
+        elif 'SUCCESS' in results:
+            logger.info("Scheduled task '{}' deleted successfully : {}".format(task, results))
+        else:
+            logger.warn("Problem deleting scheduled task '{}' : {}".format(task, results))
 
 
 def Remediate(client, remediation_script):
@@ -146,6 +156,10 @@ def Remediate(client, remediation_script):
     for d in dirs:
         commands['directories'].append(delete_directory(client, dirs[d]))
 
+    tasks = config['scheduled_tasks']
+    for t in tasks:
+        commands['scheduled_tasks'].append(delete_scheduled_task(client, tasks[t]))
+
     # Wait on results and report
     for cmd in commands['process_names']:
         cmd_pname = cmd.command[cmd.command.find('"')+1:cmd.command.rfind('"')]
@@ -173,4 +187,8 @@ def Remediate(client, remediation_script):
 
     for cmd in commands['directories']:
         directory = [d for d in [dirs[d] for d in dirs] if d in cmd.command][0]
-        evaluate_remediation_results(cmd, 'directories', directory) 
+        evaluate_remediation_results(cmd, 'directories', directory)
+
+    for cmd in commands['scheduled_tasks']:
+        task = [t for t in [tasks[t] for t in tasks] if t in cmd.command][0]
+        evaluate_remediation_results(cmd, 'scheduled_tasks', task)
