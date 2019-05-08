@@ -57,6 +57,7 @@ def main():
     parser_run.add_argument('hostname', help="the host you'd like to work with")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
     parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
+    parser_run.add_argument('-p', '--print-content', action='store_true', help='Only print results to screen.')
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
     parser_upload.add_argument('hostname', help="the host you'd like to work with")
@@ -354,7 +355,12 @@ def main():
         logger.warning("{} (ID:{}) command went to a {} state. Exiting.".format(cmd.operation, cmd.id, cmd.status))
         sys.exit(1)
     logger.info("{} command {} completed successfully".format(cmd.operation, cmd.id))
-    cmd.get_results()
+    content = None
+    if args.print_content and args.instruction == 'run':
+        content = cmd.get_results(return_content=args.print_content)
+        print(content.decode('utf-8'))
+    else:
+        cmd.get_results()
 
     print(cmd)
 
