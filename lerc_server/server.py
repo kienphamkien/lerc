@@ -181,7 +181,16 @@ def command_manager(host, remove_cid=None):
                 command.client_file_path = DEFAULT_CLIENT_DIR + command.client_file_path
                 db.session.commit()
         elif command.operation == operationTypes.RUN:
-            command.command = 'cd "'+DEFAULT_CLIENT_DIR+'" && '+command.command
+            if DEFAULT_CLIENT_DIR not in command.command:
+                command.command = 'cd "'+DEFAULT_CLIENT_DIR+'" && '+command.command
+            else:
+                # if the DEFAULT_CLIENT_DIR already in the command then this is an indication the
+                # client is fetching a command it fetched previously but the command wasn't recorded as reaching completion.
+                # this scenario should be rare but may indicate a problem.. especially if it happens more than once with the same command/host
+                if 'taskkill' in command.command:
+                    logger.error("Host:{} fetched command id:{} again and it appears the command was to kill a process. This command coule be causing CRITICAL_PROCESS_DIED blue screens on the client.".format(host, command.command_id))
+                else:
+                    logger.warn("Host:{} fetched command id:{} again. Something may be preventing the commands completion.".format(host, command.command_id))
             db.session.commit()
         return command
     return None
