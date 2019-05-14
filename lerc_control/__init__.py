@@ -40,7 +40,7 @@ def main():
     env_choices = [ sec for sec in config.sections() if config.has_option(sec, 'server') ]
     parser.add_argument('-e', '--environment', action="store", default='default', 
                         help="specify an environment to work with. Default='default'", choices=env_choices)
-    parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG")
+    parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG", default=False)
     parser.add_argument('-c', '--check', action="store", help="check on a specific command id")
     parser.add_argument('-r', '--resume', action='store', help="resume a pending command id") 
     parser.add_argument('-g', '--get', action='store', help="get results for a command id")
@@ -57,7 +57,9 @@ def main():
     parser_run.add_argument('hostname', help="the host you'd like to work with")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
     parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
-    parser_run.add_argument('-p', '--print-content', action='store_true', help='Only print results to screen.')
+    parser_run.add_argument('-p', '--print-only', action='store_true', help='Only print results to screen.')
+    parser_run.add_argument('-w', '--write-only', action='store_true', help='Only write results to file.')
+    parser_run.add_argument('-o', '--output-filename', default=None, action='store', help='Specify the name of the file to write any results to.')
 
     parser_upload = subparsers.add_parser('upload', help="Upload a file from the client to the server")
     parser_upload.add_argument('hostname', help="the host you'd like to work with")
@@ -98,6 +100,8 @@ def main():
     parser_remediate.add_argument('-kpn', '--kill-process-name', help='kill all processes by this name')
     parser_remediate.add_argument('-kpid', '--kill-process-id', help='kill process id')
     parser_remediate.add_argument('-dd', '--delete-directory', help='Delete entire directory')
+    parser_remediate.add_argument('-ds', '--delete-service', help='Delete a service from the registry and the ServicePath from the file system.')
+    parser_remediate.add_argument('-dst', '--delete-scheduled-task', help='Delete a scheduled task by name')
 
     args = parser.parse_args()
 
@@ -231,6 +235,9 @@ def main():
  
     # remediation
     if args.instruction == 'remediate':
+        if not args.debug:
+            logging.getLogger('lerc_control.lerc_api').setLevel(logging.WARNING)
+
         if args.write_template:
            import shutil
            shutil.copyfile(os.path.join(BASE_DIR, 'etc', 'example_remediate_routine.ini'), 'remediate.ini')
@@ -257,13 +264,24 @@ def main():
         if args.delete_directory:
             cmd = remediate.delete_directory(client, args.delete_directory)
             remediate.evaluate_remediation_results(cmd, 'directories', args.delete_directory)
+        if args.delete_scheduled_task:
+            cmd = remediate.delete_scheduled_task(client, args.delete_scheduled_task)
+            remediate.evaluate_remediation_results(cmd, 'scheduled_tasks', args.delete_scheduled_task)
+        if args.delete_service:
+            # delete_service returns a list of commands it issued
+            cmds = remediate.delete_service(client, args.delete_service, auto_fill=True)
+            for cmd in cmds:
+                if isinstance(cmd, tuple):
+                    remediate.evaluate_remediation_results(cmd[0], cmd[1], cmd[2])
+                else:
+                    remediate.evaluate_remediation_results(cmd, 'services', args.delete_service)
         sys.exit(0)
 
     # collections
     profile=args.environment if args.environment else 'default'
     if args.instruction == 'collect':
         if not args.debug:
-            logging.getLogger('lerc_api').setLevel(logging.WARNING)
+            logging.getLogger('lerc_control.lerc_api').setLevel(logging.WARNING)
         if args.directory:
             commands = collect.get_directory(client, args.directory)
         else:
@@ -356,9 +374,14 @@ def main():
         sys.exit(1)
     logger.info("{} command {} completed successfully".format(cmd.operation, cmd.id))
     content = None
-    if args.print_content and args.instruction == 'run':
-        content = cmd.get_results(return_content=args.print_content)
-        print(content.decode('utf-8'))
+    if args.instruction == 'run':
+        if args.print_only:
+            content = cmd.get_results(return_content=args.print_only)
+            print(content.decode('utf-8'))
+        elif args.write_only:
+            cmd.get_results(print_run=False, file_path=args.output_filename)
+        else:
+            cmd.get_results()
     else:
         cmd.get_results()
 
