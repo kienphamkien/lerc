@@ -75,7 +75,8 @@ def delete_service(client, service_name, service_path=None, auto_fill=False):
                     else:
                         service_path = line[len('PathName='):]
                         if service_path.find(' ') > 0:
-                            service_path = service_path[:service_path.find(' ')]
+                            # so there is a space without a '"'. lame. Assuming executable.
+                            service_path = service_path[:service_path.find('.exe')+4]
                     logger.info("Found service PathName '{}'".format(service_path))
                 elif 'State=Running' in line:
                     cmd = client.Run('net stop "{}"'.format(service_name))
