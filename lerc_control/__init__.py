@@ -76,6 +76,7 @@ def main():
     # response functions
     parser_collect = subparsers.add_parser('collect', help="Default (no arguments): perform a full lr.exe collection")
     parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
+    parser_collect.add_argument('-mc', '--multi-collect', action='store', help="Path to a multiple collection file")
     parser_collect.add_argument('hostname', help="the host you'd like to work with")
 
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
@@ -284,6 +285,8 @@ def main():
             logging.getLogger('lerc_control.lerc_api').setLevel(logging.WARNING)
         if args.directory:
             commands = collect.get_directory(client, args.directory)
+        elif args.multi_collect:
+            collect.multi_collect(client, args.multi_collect)
         else:
             collect.full_collection(client)
         sys.exit(0)

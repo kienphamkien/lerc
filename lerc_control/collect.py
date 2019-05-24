@@ -5,6 +5,7 @@ import subprocess
 import shlex
 import pprint
 import logging
+import configparser
 
 from lerc_control import lerc_api
 
@@ -13,7 +14,7 @@ logger = logging.getLogger("lerc_control."+__name__)
 # Get the working lerc_control directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def get_directory(lerc, dir_path):
+def get_directory(lerc, dir_path, async_run=False):
     """Compress a directory with 7zip and upload the compressed result.
 
     :param lerc_api.Client lerc: A lerc_api.Client
@@ -63,11 +64,85 @@ def get_directory(lerc, dir_path):
     logger.info("Issued CID={} to to delete '{}' and 7za.exe".format(cmd.id, outputfile))
     commands.append(cmd)
 
+    if async_run:
+        return upCmd
+
     logger.info("Getting result from the control server..".format(lerc.hostname))
     if upCmd.get_results(file_path='{}_dirOfInterest.7z'.format(lerc.hostname)):
         logger.info("Wrote {}_dirOfInterest.7z".format(lerc.hostname))
     return commands
 
+
+def collect_registry(client, reg_path):
+    """Collet the registry data at the registry value path.
+    """
+    reg_key = reg_path[reg_path.rfind('\\')+1:]
+    reg_path = reg_path[:reg_path.rfind('\\')]
+    cmd = 'REG QUERY "{}" /v "{}"'.format(reg_path, reg_key)
+    cmd = client.Run(cmd)
+    logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
+    return cmd 
+
+
+def multi_collect(client, collect_file):
+    """Pass a config formatted file describing artifacts to collect from the client.
+
+    """
+    if not os.path.exists(collect_file):
+        logger.error("'{}' does not exist.".format(collect_file))
+        return False
+
+    config = configparser.ConfigParser()
+    config.read(collect_file) 
+
+    files = config['files']
+    dirs = config['directories']
+    regValues = config['registry_values']
+
+    commands = {'files': [],
+                'directories': [],
+                'registry_values': []}
+
+    for f in files:
+        cmd = client.Upload(files[f])
+        logger.info("Issued command:{} to upload '{}' from LERC:{}".format(cmd.id, files[f], client.hostname))
+        commands['files'].append(cmd)
+
+    for reg in regValues: 
+        commands['registry_values'].append(collect_registry(client, regValues[reg]))
+
+    for d in dirs:
+        commands['directories'].append(get_directory(client, dirs[d], async_run=True))
+
+    for cmd in commands['files']:
+        logger.info("Waiting for command {} to complete..".format(cmd.id)) 
+        cmd.wait_for_completion()
+        logger.info("Getting results for '{}' collection.".format(cmd.client_file_path))
+        filename = cmd.client_file_path[cmd.client_file_path.rfind('\\')+1:]
+        filename = filename.replace(' ', '_')
+        if cmd.get_results(file_path='{}_file_{}'.format(client.hostname, filename)):
+            logger.info("+ wrote '{}_file_{}'".format(client.hostname, filename))
+
+    for cmd in commands['registry_values']:
+        rvalue = [r for r in [regValues[r] for r in regValues] if r[r.rfind('\\')+1:] in cmd.command and r[:r.rfind('\\')] in cmd.command][0]
+        logger.info("Waiting for command {} to complete..".format(cmd.id))
+        cmd.wait_for_completion()
+        logger.info("Getting results of '{}' collections..".format(rvalue))
+        rvalue_name = rvalue[rvalue.rfind('\\')+1:]
+        rvalue_name = rvalue_name.replace(' ','_')
+        if cmd.get_results(print_run=False, file_path='{}_reg_{}'.format(client.hostname, rvalue_name)):
+            logger.info("+ wrote '{}_reg_{}'".format(client.hostname, rvalue_name))
+
+    for cmd in commands['directories']:
+        directory = [d for d in [dirs[d] for d in dirs] if d in cmd.command][0]
+        logger.info("Waiting for command {} to complete..".format(cmd.id))
+        cmd.wait_for_completion()
+        dirname = directory[directory.rfind('\\')+1:].replace(' ','_')
+        logger.info("Getting results of '{}' collection..".format(cmd.client_file_path))
+        if cmd.get_results(file_path='{}_dir_{}.7z'.format(client.hostname, dirname)):
+            logger.info("+ wrote '{}_dir_{}'".format(client.hostname, dirname))
+
+    return True
 
 def full_collection(lerc):
     #########################################################################################

@@ -224,8 +224,8 @@ class Client():
                                                 params=arguments, data=json.dumps(command))
         if r.status_code != requests.codes.ok:
             self.error = { 'status_code': r.status_code, 'message': "ERROR : {}".format(r.text) }
-            self.logger.error(self.error['message'])
-            return False
+            self.logger.critical("Got status code '{}' : {}".format(r.status_code, r.json()['message']))
+            raise Exception("Something went wrong with the server. Got '{}' response.".format(r.status_code)) from None
         else: # record the command
             result = r.json()
             if 'command' in result:
@@ -366,8 +366,15 @@ class Client():
 
         self.logger.info("Getting firewall status for due diligence..")
         check_command.wait_for_completion()
-        check_command.get_results(file_path = "{}_{}_firewall_status.txt".format(self.hostname, check_command.id), print_run=False)
-
+        #check_command.get_results(file_path = "{}_{}_firewall_status.txt".format(self.hostname, check_command.id), print_run=False)
+        results = check_command.get_results(return_content=True)
+        if not results:
+            self.logger.error("Problem getting firewall status.")
+            return False
+        results = results.decode('utf-8')
+        if 'AllowOutbound' in results:
+            self.logger.warn("AllowOutbound found in firewall status. Containment failed! : Firewall Status:\n{}".format(results))
+            return False
         self.contained = True
         return self.contained
 

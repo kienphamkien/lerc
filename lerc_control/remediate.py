@@ -3,6 +3,8 @@ import os
 import logging
 import configparser
 
+from RotL import windows as win
+
 logger = logging.getLogger(__name__)
 
 REMEDIATION_TYPES = ['files', 'process_names', 'scheduled_tasks', 'services', 'directories', 'pids', 'registry_keys', 'registry_values']
@@ -11,10 +13,10 @@ def delete_file(client, file_path):
     """Delete a file on a client.
 
     :param client: A lerc_api.Client object
-    :parsm str file_path: Path to the file on the client.
+    :param str file_path: Path to the file on the client.
     :return: A lerc_api.Command object    
     """
-    cmd = client.Run('del "{}"'.format(file_path))
+    cmd = client.Run(win.delete_file(file_path))
     logger.info("Issued command:{} to delete '{}' on LERC:{}".format(cmd.id, file_path, client.hostname))
     return cmd
 
@@ -25,12 +27,8 @@ def delete_registry_value(client, reg_path):
     :param str reg_path: A registry key path + '\\' + registry value
     :return: A lerc_api.Command object
     """
-    reg_key = reg_path[reg_path.rfind('\\')+1:]
-    reg_path = reg_path[:reg_path.rfind('\\')]
-    # issue commands for both 64 bit and 32 bit OS
-    cmd_str = 'REG DELETE "{}" /v "{}" /f'.format(reg_path, reg_key)
-    cmd = client.Run(cmd_str)
-    logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd_str, client.hostname))
+    cmd = client.Run(win.delete_registry_value(reg_path))
+    logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
     return cmd
 
 def delete_registry_key(client, reg_path):
@@ -40,9 +38,8 @@ def delete_registry_key(client, reg_path):
     :param str reg_path: A registry key path that should be deleted (all values).
     :return: A lerc_api.Command
     """
-    cmd_str = 'REG DELETE "{}" /f'.format(reg_path)
-    cmd = client.Run(cmd_str)
-    logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd_str, client.hostname))
+    cmd = client.Run(win.delete_registry_key(reg_path))
+    logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
     return cmd
 
 def delete_service(client, service_name, service_path=None, auto_fill=False):
@@ -75,24 +72,16 @@ def delete_service(client, service_name, service_path=None, auto_fill=False):
                     else:
                         service_path = line[len('PathName='):]
                         if service_path.find(' ') > 0:
-                            service_path = service_path[:service_path.find(' ')]
+                            # so there is a space without a '"'. lame. Assuming executable.
+                            service_path = service_path[:service_path.find('.exe')+4]
                     logger.info("Found service PathName '{}'".format(service_path))
                 elif 'State=Running' in line:
-                    cmd = client.Run('net stop "{}"'.format(service_name))
-                    logger.info("Service is running. Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
-                    commands.append(cmd)
+                    logger.info("Service is running on LERC:{}".format(cmd.id, cmd.command, client.hostname))
     if service_path is not None:
         # either the user provided a service path or we got it with wmic via auto=True
-        if not commands:
-            # issue command to stop the service since we didn't already
-            cmd = client.Run('net stop "{}"'.format(service_name))
-            logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
-            commands.append(cmd)
         # go ahead and make the service file deletion a tuple of what evaluate_remediation_results needs
         commands.append((delete_file(client, service_path), 'files', service_path))
-    # finally, delete the service from the registry
-    cmd = 'SC DELETE "{}"'.format(service_name)
-    cmd = client.Run(cmd)
+    cmd = client.Run(win.delete_service(service_name))
     logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
     commands.append(cmd)
     return commands
@@ -104,7 +93,7 @@ def delete_scheduled_task(client, task_name):
     :param str task_name: The name of the scheduled task.
     :return: A lerc_api.Command object
     """
-    cmd = client.Run('schtasks /Delete /TN "{}" /F'.format(task_name))
+    cmd = client.Run(win.delete_scheduled_task(task_name))
     logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
     return cmd
 
@@ -115,9 +104,7 @@ def delete_directory(client, dir_path):
     :param str dir_path: The path to the directory.
     :return: A lerc_api.Command object
     """
-    cmd = 'cd "{}" && DEL /F /Q /S * > NUL'.format(dir_path)
-    cmd += ' && cd .. && RMDIR /Q /S "{}"'.format(dir_path)
-    cmd = client.Run(cmd)
+    cmd = client.Run(win.delete_directory(dir_path))
     logger.info("Issued command:{} to delete '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
     return cmd
 
@@ -128,7 +115,7 @@ def kill_process_name(client, process):
     :param str process: The process name
     :return: A lerc_api.Command object
     """
-    cmd = client.Run('taskkill /IM "{}" /F'.format(process))
+    cmd = client.Run(win.kill_process_name(process))
     logger.info("Issued command:{} to kill '{}' on LERC:{}".format(cmd.id, process, client.hostname))
     return cmd
 
@@ -139,7 +126,7 @@ def kill_process_id(client, pid):
     :param str pid: The process ID
     :return: A lerc_api.Command object
     """
-    cmd = client.Run('taskkill /F /PID {}'.format(pid))
+    cmd = client.Run(win.kill_process_id(pid))
     logger.info("Issued command:{} to kill '{}' on LERC:{}".format(cmd.id, pid, client.hostname))
     return cmd
 
@@ -260,7 +247,8 @@ def Remediate(client, remediation_script):
                 'directories': [],
                 'pids': [],
                 'registry_keys': [],
-                'registry_values': []}
+                'registry_values': [],
+                'services': []}
 
     # Order matters
     processes = config['process_names']
