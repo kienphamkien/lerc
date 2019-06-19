@@ -211,7 +211,7 @@ def main():
             logger.error("Failed to import deployment functions from lerc_control.deploy_lerc OR cbapi.")
             sys.exit(1)
         logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.ERROR)
-        environments = auth.CredentialStore("response").get_profiles()
+        environments = auth.FileCredentialStore("response").get_profiles()
         sensors = []
         logger.debug("Trying to find the sensor in the available carbonblack environments.")
         for env in environments:         
