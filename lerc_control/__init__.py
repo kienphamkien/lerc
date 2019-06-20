@@ -38,6 +38,12 @@ def main():
     # LERC environment choices
     config = lerc_api.load_config()
     env_choices = [ sec for sec in config.sections() if config.has_option(sec, 'server') ]
+
+    # For making collect options of collection scripts
+    collect_scripts = []
+    if config.has_section('scripts'):
+        collect_scripts = [sname for sname in config['scripts'] if sname.startswith('collect_')]
+
     parser.add_argument('-e', '--environment', action="store", default='default', 
                         help="specify an environment to work with. Default='default'", choices=env_choices)
     parser.add_argument('-d', '--debug', action="store_true", help="set logging to DEBUG", default=False)
@@ -78,6 +84,15 @@ def main():
     parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
     parser_collect.add_argument('-mc', '--multi-collect', action='store', help="Path to a multiple collection file")
     parser_collect.add_argument('hostname', help="the host you'd like to work with")
+    if collect_scripts:
+        for script in collect_scripts:
+            name = script[len('collect_'):]
+            abrv = name[0]
+            tmp = name
+            for i in range(name.count('_')):
+                tmp = tmp[tmp.find('_')+1:]
+                abrv += tmp[0]
+            parser_collect.add_argument('-{}'.format(abrv), '--{}'.format(name), dest='{}'.format(script), action='store_true', help=script.replace('_',' '))
 
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
     parser_contain.add_argument('hostname', help="the host you'd like to work with")
@@ -105,7 +120,7 @@ def main():
     parser_remediate.add_argument('-dst', '--delete-scheduled-task', help='Delete a scheduled task by name')
 
     args = parser.parse_args()
-
+ 
     if args.debug:
         logging.getLogger('lerc_api').setLevel(logging.DEBUG)
         logging.getLogger('lerc_control').setLevel(logging.DEBUG)
@@ -281,12 +296,17 @@ def main():
     # collections
     profile=args.environment if args.environment else 'default'
     if args.instruction == 'collect':
+        # From argparse Namespace, get collection script names if the argument is set
+        collect_scripts = [carg for carg, value in vars(args).items() if carg.startswith('collect_') and value is True]
         if not args.debug:
             logging.getLogger('lerc_control.lerc_api').setLevel(logging.WARNING)
         if args.directory:
             commands = collect.get_directory(client, args.directory)
         elif args.multi_collect:
             collect.multi_collect(client, args.multi_collect)
+        elif collect_scripts:
+            for script in collect_scripts:
+                execute_script(client, config['scripts'][script])
         else:
             collect.full_collection(client)
         sys.exit(0)
