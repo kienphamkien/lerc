@@ -59,6 +59,9 @@ def execute_script(lerc, script_path):
             script_path = BASE_DIR + script_path
         else:
             script_path = BASE_DIR + '/' + script_path
+    if not os.path.exists(script_path):
+        logger.error("The path to the script does not exist.")
+        return False
     script.read(script_path)
  
     if script_missing_required_keys(script, REQUIRED_CMD_KEYS):
