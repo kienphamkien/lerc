@@ -333,7 +333,23 @@ def main():
         elif args.off:
             client.release_containment()
         elif args.status:
-            print("Containment status check not yet implemented.")
+            if not args.debug:
+                logging.getLogger('lerc_control.lerc_api').setLevel(logging.WARNING)
+            logger.info("Checking containment status for {}. This may take a moment ... ".format(client.hostname))
+            containment_check = client.Run('ping google.com')
+            firewall_status = client.Run('netsh advfirewall show allprofiles')
+            containment_check.wait_for_completion()
+            results = containment_check.get_results(return_content=True).decode('utf-8')
+            if results and 'General failure.' in results:
+                logger.info("{} is currently contained.".format(client.hostname))
+            else:
+                firewall_status.wait_for_completion()
+                results = firewall_status.get_results(return_content=True).decode('utf-8')
+                if results and 'AllowOutbound' in results:
+                    logger.info("{} is NOT contained.".format(client.hostname))
+                else:
+                    logger.info("Unable to determine containment status. Printing firewall status:")
+                    logger.info(results)
 
     elif args.instruction == 'download':
         # if client_file_path is not specified the client will write the file to it's local dir
