@@ -88,6 +88,9 @@ def main():
         for script in collect_scripts:
             name = script[len('collect_'):]
             abrv = name[0]
+            # can't use '-h' help arg
+            if abrv == 'h':
+                abrv = 'c' + abrv
             tmp = name
             for i in range(name.count('_')):
                 tmp = tmp[tmp.find('_')+1:]
