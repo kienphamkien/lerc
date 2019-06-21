@@ -14,7 +14,7 @@ REQUIRED_OP_KEY_MAP = {'RUN': ['command'],
                        'UPLOAD': ['path'],
                        'DOWNLOAD': ['file_path'],
                        'QUIT': []}
-OPTIONAL_OP_KEY_MAP = {'RUN': ['async_run', 'write_results_path'],
+OPTIONAL_OP_KEY_MAP = {'RUN': ['async_run', 'write_results_path', 'print_results'],
                        'UPLOAD': ['write_results_path'],
                        'DOWNLOAD': ['client_file_path'],
                        'QUIT': []}
@@ -85,23 +85,26 @@ def execute_script(lerc, script_path):
         command_history[command] = {}
         op =  script[command]['operation'].upper()
 
+        print_results = True
         get_results = False
+        write_results_path = None
         if 'get_results' in script[command]:
             get_results = script[command].getboolean('get_results')
-        # should only ever be in run and upload commands
-        write_results_path = None
         if 'write_results_path' in script[command]:
-            write_results_path = script[command]['write_results_path']
+            write_results_path = script[command]['write_results_path'].format(HOSTNAME=lerc.hostname)
 
         if op == 'RUN':
             async_run = False
             if 'async_run' in script[command]:
                 async_run = script[command].getboolean('async_run')
+            if 'print_results' in script[command]:
+                print_results = script[command].getboolean('print_results')
             run_string = script[command]['command']
             cmd = lerc.Run(run_string, async=async_run)
             command_history[command] = cmd
             command_history[command].get_the_results = get_results
             command_history[command].write_results_path = write_results_path
+            command_history[command].print_results = print_results
             logger.info("Issued : Run - CID={} - {}".format(cmd.id, run_string))
         elif op == 'DOWNLOAD':
             client_file_path = None
@@ -129,11 +132,12 @@ def execute_script(lerc, script_path):
             command_history[command] = cmd
             command_history[command].get_the_results = get_results
             command_history[command].write_results_path = write_results_path
+            command_history[command].print_results = False
             logger.info("Issued : Upload - CID={} - {}".format(cmd.id, path))
         elif op == 'QUIT':
             cmd = lerc.Quit()
             command_history[command] = cmd
-            logger.info("Issued : Quit - CID={}".format(cmd.id, path))
+            logger.info("Issued : Quit - CID={}".format(cmd.id))
 
     logger.info("Checking to see if results need to be obtained ...")
     for command in command_history:
@@ -142,6 +146,8 @@ def execute_script(lerc, script_path):
             logger.info("Waiting for command {} to complete..".format(cmd.id))
             cmd.wait_for_completion()
             logger.info("Getting the results for command {}".format(cmd.id))
-            cmd.get_results(file_path=cmd.write_results_path)
+            cmd.get_results(file_path=cmd.write_results_path, print_run=cmd.print_results)
+            if cmd.write_results_path and os.path.exists(cmd.write_results_path):
+                logger.info("Wrote results: {}".format(cmd.write_results_path))
 
     return command_history
