@@ -356,7 +356,8 @@ class Client():
             self.logger.error("Containment command failed : {}".format(containment_command))
             return False
         self.logger.debug("{}".format(containment_command))
-        self.logger.info("Host contained at: {}".format(datetime.now()))
+        # XXX used command.evaluated_time to info log containment time
+        self.logger.info("Containment command completed at: {}".format(datetime.now()))
 
         self.logger.info("Command {} should return before {} seconds have passed.".format(kill_command.id, self.sleep_cycle))
         if not kill_command.wait_for_completion():
@@ -366,7 +367,6 @@ class Client():
 
         self.logger.info("Getting firewall status for due diligence..")
         check_command.wait_for_completion()
-        #check_command.get_results(file_path = "{}_{}_firewall_status.txt".format(self.hostname, check_command.id), print_run=False)
         results = check_command.get_results(return_content=True)
         if not results:
             self.logger.error("Problem getting firewall status.")
@@ -482,7 +482,11 @@ class Command():
                 while data:
                     yield data
                     data = f.read(4096)
-        r = requests.post(self._ls.server+'/command/upload', cert=self._ls.cert, params=arguments, data=gen()).json()
+        try:
+            r = requests.post(self._ls.server+'/command/upload', cert=self._ls.cert, params=arguments, data=gen()).json()
+        except requests.exceptions.ConnectionError as e:
+            self.logger.error("Connection Error when uploading to server (using a proxy? - https://github.com/IntegralDefense/lerc/issues/33): {}".format(e))
+            return False
         if 'error' in r:
             self.logger.error("{}".format(r['error']))
             return r
