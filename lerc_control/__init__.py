@@ -8,7 +8,7 @@ import logging
 import coloredlogs
 import pprint
 from lerc_control import lerc_api, collect
-from lerc_control.scripted import execute_script
+from lerc_control.scripted import execute_script, get_script_results
 from lerc_control.helpers import TablePrinter
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -32,17 +32,58 @@ try:
 except:
     pass
 
+def _parse_collection_scripts(collect_scripts):
+    """
+    Parse list of collection scripts names and resturn a list structure formatted to create
+    argparse arguments. Where, list elements are arguments presented as dictionaries like so:
+        ```
+        {script: raw collection script name,
+        abrv: argparse abbreviation,
+        name: argument name}
+        ```
+    If 'subparser' is a dict key, the value will be the name of the subparser and a 'args' key will
+    contain a list of arguments for that subparser.
+    """
+    arguments = []
+    subs = [name[len('collect_'):name.find('_', len('collect_'))] for name in collect_scripts if name.count('_') > 1]
+    subs = set([name for name in subs if subs.count(name)>1])
+    for sub in subs:
+        arguments.append({ 'subparser': sub,
+                            'args': []})
+    for script in collect_scripts:
+        
+        name = script[len('collect_'):]
+        sub_name = None
+        if name.count('_') > 0:
+            sub_name = name[:name.find('_')]
+        abrv = name[0]
+        # can't use '-h' help arg
+        if abrv == 'h':
+            abrv = 'c' + abrv
+        tmp = name
+        for i in range(name.count('_')):
+            tmp = tmp[tmp.find('_')+1:]
+            abrv += tmp[0]
+        argument = {'script': script, 
+                    'name': name,
+                    'abrv': abrv}
+        if sub_name in subs:
+            for arg in arguments:
+                if 'subparser' in arg and arg['subparser'] == sub_name:
+                    argument['name'] = name[len(sub_name)+1:]
+                    argument['abrv'] = abrv[1:]
+                    arg['args'].append(argument)
+        else:
+            arguments.append(argument)
+    return arguments
+
+
 def main():
 
     parser = argparse.ArgumentParser(description="User interface to the LERC control server")
     # LERC environment choices
     config = lerc_api.load_config()
     env_choices = [ sec for sec in config.sections() if config.has_option(sec, 'server') ]
-
-    # For making collect options of collection scripts
-    collect_scripts = []
-    if config.has_section('scripts'):
-        collect_scripts = [sname for sname in config['scripts'] if sname.startswith('collect_')]
 
     parser.add_argument('-e', '--environment', action="store", default='default', 
                         help="specify an environment to work with. Default='default'", choices=env_choices)
@@ -79,22 +120,46 @@ def main():
     parser_quit = subparsers.add_parser('quit', help="tell the client to uninstall itself")
     parser_quit.add_argument('hostname', help="the host you'd like to work with")
 
-    # response functions
+    parser_script = subparsers.add_parser('script', help="run a scripted routine on this lerc.")
+    parser_script.add_argument('hostname', help="the host you'd like to work with")
+    parser_script.add_argument('-l', '--list-scripts', action='store_true', help="list scripts availble to lerc_ui")
+    parser_script.add_argument('-s', '--script-name', help="provide the name of a script to run")
+    parser_script.add_argument('-f', '--file-path', help="the path to a custom script you want to execute")
+
+    ## response functions - collect, contain, and remediate
+
+    # collect
     parser_collect = subparsers.add_parser('collect', help="Default (no arguments): perform a full lr.exe collection")
     parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
     parser_collect.add_argument('-mc', '--multi-collect', action='store', help="Path to a multiple collection file")
     parser_collect.add_argument('hostname', help="the host you'd like to work with")
-    if collect_scripts:
-        for script in collect_scripts:
-            name = script[len('collect_'):]
-            abrv = name[0]
-            # can't use '-h' help arg
-            if abrv == 'h':
-                abrv = 'c' + abrv
-            tmp = name
-            for i in range(name.count('_')):
-                tmp = tmp[tmp.find('_')+1:]
-                abrv += tmp[0]
+    # Make collect argument options of collection scripts
+    collect_scripts = []
+    if config.has_section('scripts'):
+        collect_scripts = [sname for sname in config['scripts'] if sname.startswith('collect_')]
+    arguments = _parse_collection_scripts(collect_scripts)
+    collect_subparsers = None
+    sub_collect_parsers = {}
+    for arg in arguments:
+        if 'subparser' in arg:
+            if collect_subparsers is None:
+                collect_subparsers = parser_collect.add_subparsers(dest='sub_collect_scipts')
+            subname = arg['subparser']
+            sub_collect_parsers[subname] = collect_subparsers.add_parser(subname, help="Default: perform all {} collections.".format(subname),
+                                                                         description='All options will be set if no option is specified.')
+            for subarg in arg['args']:
+                name = subarg['name']
+                script = subarg['script']
+                abrv =  subarg['abrv']
+                # try to make sure we don't add the same option string more than once
+                if '-'+abrv in sub_collect_parsers[subname]._option_string_actions:
+                    #print(sub_collect_parsers[subname]._option_string_actions['-'+abrv])
+                    abrv = abrv+name[1]
+                sub_collect_parsers[subname].add_argument('-{}'.format(abrv), '--{}'.format(name), dest='{}'.format(script), action='store_true', help=script.replace('_',' '))
+        else:
+            abrv = arg['abrv']
+            name = arg['name']
+            script = arg['script']
             parser_collect.add_argument('-{}'.format(abrv), '--{}'.format(name), dest='{}'.format(script), action='store_true', help=script.replace('_',' '))
 
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
@@ -102,12 +167,6 @@ def main():
     parser_contain.add_argument('-on', action='store_true', help="turn on containment")
     parser_contain.add_argument('-off', action='store_true', help="turn off containment")
     parser_contain.add_argument('-s', '--status', action='store_true', help="Get containment status of host")
-
-    parser_script = subparsers.add_parser('script', help="run a scripted routine on this lerc.")
-    parser_script.add_argument('hostname', help="the host you'd like to work with")
-    parser_script.add_argument('-l', '--list-scripts', action='store_true', help="list scripts availble to lerc_ui")
-    parser_script.add_argument('-s', '--script-name', help="provide the name of a script to run")
-    parser_script.add_argument('-f', '--file-path', help="the path to a custom script you want to execute")
 
     parser_remediate = subparsers.add_parser('remediate', help="Remediate an infected host")
     parser_remediate.add_argument('hostname', help="the host you'd like to work with")
@@ -123,7 +182,9 @@ def main():
     parser_remediate.add_argument('-dst', '--delete-scheduled-task', help='Delete a scheduled task by name')
 
     args = parser.parse_args()
- 
+
+    print(vars(args))
+
     if args.debug:
         logging.getLogger('lerc_api').setLevel(logging.DEBUG)
         logging.getLogger('lerc_control').setLevel(logging.DEBUG)
@@ -301,6 +362,12 @@ def main():
     if args.instruction == 'collect':
         # From argparse Namespace, get collection script names if the argument is set
         collect_scripts = [carg for carg, value in vars(args).items() if carg.startswith('collect_') and value is True]
+
+        if args.sub_collect_scipts:
+            # If no specific scripts specified from this collect category, then we run all scripts
+            if not any(args.sub_collect_scipts in script for script in collect_scripts):
+                collect_scripts.extend([sname for sname in config['scripts'] if sname.startswith('collect_'+args.sub_collect_scipts)])
+
         if not args.debug:
             logging.getLogger('lerc_control.lerc_api').setLevel(logging.WARNING)
         if args.directory:
@@ -308,8 +375,10 @@ def main():
         elif args.multi_collect:
             collect.multi_collect(client, args.multi_collect)
         elif collect_scripts:
+            cmds = []
             for script in collect_scripts:
-                execute_script(client, config['scripts'][script])
+                cmds.extend(execute_script(client, config['scripts'][script], return_result_commands=True))
+            get_script_results(cmds)
         else:
             collect.full_collection(client)
         sys.exit(0)
