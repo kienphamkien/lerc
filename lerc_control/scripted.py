@@ -42,15 +42,16 @@ def get_script_results(cmds):
     """
     Wait for and collect results from the given list of script commands.
     """
+    written_result_cmds = []
     for cmd in cmds:
-        print(cmd)
         logger.info("Waiting for command {} to complete..".format(cmd.id))
         cmd.wait_for_completion()
         logger.info("Getting the results for command {}".format(cmd.id))
         cmd.get_results(file_path=cmd.write_results_path, print_run=cmd.print_results)
         if cmd.write_results_path and os.path.exists(cmd.write_results_path):
             logger.info("Wrote results: {}".format(cmd.write_results_path))
-    return
+            written_result_cmds.append(cmd)
+    return written_result_cmds
 
 
 def execute_script(lerc, script_path, return_result_commands=False):

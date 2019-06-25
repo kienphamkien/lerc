@@ -183,8 +183,6 @@ def main():
 
     args = parser.parse_args()
 
-    print(vars(args))
-
     if args.debug:
         logging.getLogger('lerc_api').setLevel(logging.DEBUG)
         logging.getLogger('lerc_control').setLevel(logging.DEBUG)
@@ -378,7 +376,9 @@ def main():
             cmds = []
             for script in collect_scripts:
                 cmds.extend(execute_script(client, config['scripts'][script], return_result_commands=True))
-            get_script_results(cmds)
+            written_cmd_results = get_script_results(cmds)
+            for cmd in written_cmd_results:
+                print("\t+ Results from CMD {} written: {}".format(cmd.id, cmd.write_results_path))
         else:
             collect.full_collection(client)
         sys.exit(0)
