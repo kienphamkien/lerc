@@ -37,11 +37,29 @@ def operation_missing_required_keys(config, section, KEYS):
             return True
     return False
 
-def execute_script(lerc, script_path):
+
+def get_script_results(cmds):
+    """
+    Wait for and collect results from the given list of script commands.
+    """
+    written_result_cmds = []
+    for cmd in cmds:
+        logger.info("Waiting for command {} to complete..".format(cmd.id))
+        cmd.wait_for_completion()
+        logger.info("Getting the results for command {}".format(cmd.id))
+        cmd.get_results(file_path=cmd.write_results_path, print_run=cmd.print_results)
+        if cmd.write_results_path and os.path.exists(cmd.write_results_path):
+            logger.info("Wrote results: {}".format(cmd.write_results_path))
+            written_result_cmds.append(cmd)
+    return written_result_cmds
+
+
+def execute_script(lerc, script_path, return_result_commands=False):
     """Execute a script on this host.
 
     :param lerc_api.Client lerc: A lerc_api.Client object.
     :param str script_path: the path to the script
+    :param bool return_result_commands: If True, return list of commands that we need to get results from.
     :return: a dictionary of the commands issued
     """
 
@@ -62,7 +80,11 @@ def execute_script(lerc, script_path):
     if not os.path.exists(script_path):
         logger.error("The path to the script does not exist.")
         return False
-    script.read(script_path)
+    try:
+        script.read(script_path)
+    except Exception as e:
+        logger.error("ConfigParser Error reading '{}' : {}".format(script_path, e))
+        return False
  
     if script_missing_required_keys(script, REQUIRED_CMD_KEYS):
         return False
@@ -140,14 +162,20 @@ def execute_script(lerc, script_path):
             logger.info("Issued : Quit - CID={}".format(cmd.id))
 
     logger.info("Checking to see if results need to be obtained ...")
+    result_commands = []
     for command in command_history:
         cmd = command_history[command]
         if hasattr(cmd, 'get_the_results') and cmd.get_the_results:
-            logger.info("Waiting for command {} to complete..".format(cmd.id))
-            cmd.wait_for_completion()
-            logger.info("Getting the results for command {}".format(cmd.id))
-            cmd.get_results(file_path=cmd.write_results_path, print_run=cmd.print_results)
-            if cmd.write_results_path and os.path.exists(cmd.write_results_path):
-                logger.info("Wrote results: {}".format(cmd.write_results_path))
+            if return_result_commands:
+                result_commands.append(cmd)
+            else:
+                logger.info("Waiting for command {} to complete..".format(cmd.id))
+                cmd.wait_for_completion()
+                logger.info("Getting the results for command {}".format(cmd.id))
+                cmd.get_results(file_path=cmd.write_results_path, print_run=cmd.print_results)
+                if cmd.write_results_path and os.path.exists(cmd.write_results_path):
+                    logger.info("Wrote results: {}".format(cmd.write_results_path))
 
+    if return_result_commands:
+        return result_commands
     return command_history
