@@ -1,0 +1,1 @@
+SELECT Path,KeyName,ValueName,ValueType,Value,LastWriteTime as LastWriteTimeUTC FROM HKLM, HKCU, HKU

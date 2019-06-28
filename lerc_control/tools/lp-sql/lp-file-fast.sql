@@ -1,0 +1,1 @@
+SELECT Path,Name,Size,Attributes,TO_UTCTIME(CreationTime) as CreationTimeUTC,TO_UTCTIME(LastAccessTime) as LastAccessTimeUTC,TO_UTCTIME(LastWriteTime) as LastWriteTimeUTC FROM %systemdrive%\*.*
