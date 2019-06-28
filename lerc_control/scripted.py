@@ -129,6 +129,7 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
         write_results_path = None
         is_common_setup_command = False
         is_common_cleanup_command = False
+        message = False
         if 'get_results' in script[command]:
             get_results = script[command].getboolean('get_results')
         if 'write_results_path' in script[command]:
@@ -137,6 +138,8 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
             is_common_setup_command = script[command].getboolean('common_setup_command')
         if 'common_cleanup_command' in script[command]:
             is_common_cleanup_command = script[command].getboolean('common_cleanup_command')
+        if 'message' in script[command]:
+            message = script[command]['message'].format(HOSTNAME=lerc.hostname)
 
         if op == 'RUN':
             async_run = False
@@ -168,6 +171,8 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
             if is_common_setup_command:
                 COMMON_SETUP_COMMANDS['RUN'].append(cmd)
             logger.info("Issued : Run - CID={} - {}".format(cmd.id, run_string))
+            if message:
+                logger.info("SCRIPT MESSAGE: {}".format(message))
         elif op == 'DOWNLOAD':
             client_file_path = None
             if 'client_file_path' in script[command]:
@@ -202,6 +207,8 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
             if is_common_setup_command:
                 COMMON_SETUP_COMMANDS['DOWNLOAD'].append(cmd)
             logger.info("Issued : Download - CID={} - {}".format(cmd.id, file_path))
+            if message:
+                logger.info("SCRIPT MESSAGE: {}".format(message))
         elif op == 'UPLOAD':
             path = script[command]['path']
             # if the script doesn't specify the full path, add default client working dir
@@ -213,6 +220,8 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
             command_history[command].write_results_path = write_results_path
             command_history[command].print_results = False
             logger.info("Issued : Upload - CID={} - {}".format(cmd.id, path))
+            if message:
+                logger.info("SCRIPT MESSAGE: {}".format(message))
         elif op == 'QUIT':
             if is_common_cleanup_command and not execute_cleanup_commands:
                 if not COMMON_CLEANUP_COMMANDS['QUIT']:
@@ -221,6 +230,8 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
             cmd = lerc.Quit()
             command_history[command] = cmd
             logger.info("Issued : Quit - CID={}".format(cmd.id))
+            if message:
+                logger.info("SCRIPT MESSAGE: {}".format(message))
 
     logger.info("Checking to see if results need to be obtained ...")
     result_commands = []
