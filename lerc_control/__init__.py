@@ -8,7 +8,7 @@ import logging
 import coloredlogs
 import pprint
 from lerc_control import lerc_api, collect
-from lerc_control.scripted import execute_script, get_script_results
+from lerc_control.scripted import execute_script, get_script_results, load_script, COMMON_CLEANUP_COMMANDS
 from lerc_control.helpers import TablePrinter
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -131,6 +131,7 @@ def main():
     # collect
     parser_collect = subparsers.add_parser('collect', help="Default (no arguments): perform a full lr.exe collection")
     parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
+    parser_collect.add_argument('-f', '--file-path', action='store', help="Path to file on client you want to collect")
     parser_collect.add_argument('-mc', '--multi-collect', action='store', help="Path to a multiple collection file")
     parser_collect.add_argument('hostname', help="the host you'd like to work with")
     # Make collect argument options of collection scripts
@@ -151,16 +152,24 @@ def main():
                 name = subarg['name']
                 script = subarg['script']
                 abrv =  subarg['abrv']
+                script_config = load_script(config['scripts'][script])
+                description = script.replace('_',' ')
+                if script_config and script_config.has_section('overview'):
+                    description = script_config['overview']['description'] if script_config.has_option('overview', 'description') else description
                 # try to make sure we don't add the same option string more than once
                 if '-'+abrv in sub_collect_parsers[subname]._option_string_actions:
                     #print(sub_collect_parsers[subname]._option_string_actions['-'+abrv])
                     abrv = abrv+name[1]
-                sub_collect_parsers[subname].add_argument('-{}'.format(abrv), '--{}'.format(name), dest='{}'.format(script), action='store_true', help=script.replace('_',' '))
+                sub_collect_parsers[subname].add_argument('-{}'.format(abrv), '--{}'.format(name), dest='{}'.format(script), action='store_true', help=description)
         else:
             abrv = arg['abrv']
             name = arg['name']
             script = arg['script']
-            parser_collect.add_argument('-{}'.format(abrv), '--{}'.format(name), dest='{}'.format(script), action='store_true', help=script.replace('_',' '))
+            script_config = load_script(config['scripts'][script])
+            description = script.replace('_',' ')
+            if script_config and script_config.has_section('overview'):
+                description = script_config['overview']['description'] if script_config.has_option('overview', 'description') else description
+            parser_collect.add_argument('-{}'.format(abrv), '--{}'.format(name), dest='{}'.format(script), action='store_true', help=description)
 
     parser_contain = subparsers.add_parser('contain', help="Contain an infected host")
     parser_contain.add_argument('hostname', help="the host you'd like to work with")
@@ -372,13 +381,29 @@ def main():
             commands = collect.get_directory(client, args.directory)
         elif args.multi_collect:
             collect.multi_collect(client, args.multi_collect)
+        elif args.file_path:
+            cmd = client.Upload(args.file_path)
+            logger.info("Issued {} to collect file : {}".format(cmd.id, args.file_path))
+            logging.getLogger('lerc_control.lerc_api').setLevel(logging.INFO)
+            cmd.wait_for_completion()
+            cmd.get_results()
         elif collect_scripts:
             cmds = []
             for script in collect_scripts:
-                cmds.extend(execute_script(client, config['scripts'][script], return_result_commands=True))
+                try:
+                    cmds.extend(execute_script(client, config['scripts'][script], return_result_commands=True, execute_cleanup_commands=False))
+                except:
+                    sys.exit(1)
+            cleanup_cmds = COMMON_CLEANUP_COMMANDS
+            for cmd in cleanup_cmds['RUN']:
+                cmd = client.Run(cmd)
+                logger.info("Issued cleanup command {} : {}".format(cmd.id, cmd.command))
             written_cmd_results = get_script_results(cmds)
             for cmd in written_cmd_results:
                 print("\t+ Results from CMD {} written: {}".format(cmd.id, cmd.write_results_path))
+            if len(cleanup_cmds['QUIT']) > 0:
+                cmd = client.Quit()
+                logger.info("Issued command {} for client to uninstall itself from host.".format(cmd.id))
         else:
             collect.full_collection(client)
         sys.exit(0)
