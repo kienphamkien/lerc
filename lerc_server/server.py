@@ -152,6 +152,7 @@ def command_manager(host, remove_cid=None):
     # An error occured somewhere if a client fetched without a command moving out of the STARTED state
     started_command = Commands.query.filter(Commands.hostname==host).filter(Commands.status==cmdStatusTypes.STARTED).order_by(Commands.command_id.asc()).first()
     if started_command:
+        # XXX Maybe write code that attempts to recover the STARTED but not COMPLETE command
         logger.error("{} fetched without finishing CID={} - Changing command statue to UNKNOWN.".format(started_command.hostname, started_command.command_id))
         started_command.status = cmdStatusTypes.UNKNOWN
         db.session.commit()
@@ -172,7 +173,8 @@ def command_manager(host, remove_cid=None):
                 statinfo = os.stat(os.path.join(BASE_DIR,command.server_file_path))
                 if statinfo.st_size > (command.file_position - 1) and statinfo.st_size != 0:
                     command.file_position = statinfo.st_size + 1
-                    logger.warning("Updating database: More bytes found on server than recorded in database. Prior exception went unhandled or unnoticed. Probable connection drop and resume before server reached timeout")
+                    # Likly a connection drop and resume before server reached timeout
+                    logger.warning("CID={} : More bytes found on server than recorded in database. Updating database to recover.".format(command.command_id))
                     db.session.commit()
         elif command.operation == operationTypes.DOWNLOAD:
             if '\\' not in command.client_file_path:
@@ -466,7 +468,12 @@ class Error(Resource):
         # logic to record command completion
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
         command.log_file_path = "{}{}_{}_ERROR.log".format(LOG_DIR, host, cid)
-        command.status = cmdStatusTypes.ERROR
+        # XXX So far, I've been unable to figure out why this happens with large transfers
+        if 'Unable to read data from the transport connection' in error_message:
+            logger.info("Changing cmd status from {} to PENDING so it correctly resumes.".format(command.status))
+            command.status = cmdStatusTypes.PENDING
+        else:
+            command.status = cmdStatusTypes.ERROR
         # update last_activity
         client = Clients.query.filter_by(hostname=host).one()
         client.last_activity = datetime.now()
@@ -617,7 +624,15 @@ class Query(Resource):
                     query = query.filter(Commands.operation==op)
 
             commands = query.all()
-            results['commands'] = [command.to_dict() for command in commands]  
+            results['commands'] = [command.to_dict() for command in commands]
+            if len(results['commands']) == 1:
+                # lerc_api.Command.refresh()
+                log_file_path = results['commands'][0]['log_file_path']
+                if log_file_path:
+                    with open(os.path.join(BASE_DIR, log_file_path), 'r') as f:
+                        results['commands'][0]['error'] = json.loads(f.read())
+                else: # No error log file
+                    results['commands'][0]['error'] = None
 
         return results
 
@@ -868,6 +883,8 @@ class AnalystDownload(Resource):
                 with open(os.path.join(BASE_DIR, command.log_file_path), 'r') as f:
                     error_report = json.loads(f.read())
                 return error_report
+            else: # No error log file
+                return {'error': None}
 
         if 'position' not in request.args:
             logger.warn("Malformed analyst download request")
