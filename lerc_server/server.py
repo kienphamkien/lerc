@@ -223,6 +223,18 @@ def receive_streamed_data(command):
             stream_error = "Stream closed pre-maturely. ({})".format(str(e))
         f.close()
     return stream_error
+
+
+def update_file_position(command):
+    if command.server_file_path is not None:
+        try:
+            statinfo = os.stat(os.path.join(BASE_DIR,command.server_file_path))
+            if command.file_position != statinfo.st_size and command.file_position <= command.filesize:
+                command.file_position = statinfo.st_size + 1
+                logger.info("updating file_position for {} to {}".format(command.command_id, command.file_position))
+                db.session.commit()
+        except FileNotFoundError as e:
+            logger.warning("{} not found on server.".format(command.server_file_path))
 # End helper functions #
 
 
@@ -465,12 +477,15 @@ class Error(Resource):
                 logger.error("An Exception of type {} occured when receiving error from {}: {}".format(type(e).__name__,
                                                                                                        host, str(e)))
                 break
-        # logic to record command completion
+        logger.warn("Error message from host={} for command_id={} : '{}'".format(host, cid, error_message))
+
+        # update the command
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
         command.log_file_path = "{}{}_{}_ERROR.log".format(LOG_DIR, host, cid)
         # XXX So far, I've been unable to figure out why this happens with large transfers
-        if 'Unable to read data from the transport connection' in error_message:
-            logger.info("Changing cmd status from {} to PENDING so it correctly resumes.".format(command.status))
+        if 'Unable to read data from the transport connection' in error_message or \
+           'Unable to write data to the transport connection' in error_message:
+            logger.info("Changing CID={} status from {} to PENDING so it correctly resumes.".format(cid, command.status))
             command.status = cmdStatusTypes.PENDING
         else:
             command.status = cmdStatusTypes.ERROR
@@ -488,7 +503,6 @@ class Error(Resource):
                      'error': str(error_message)}
         with open(os.path.join(BASE_DIR, command.log_file_path), 'w') as f:
             json.dump(error_log, f)
-        logger.warn("Error message from host={} for command_id={} : '{}'".format(host, cid, error_message))
         return False
 # end client api resources
 
@@ -624,15 +638,23 @@ class Query(Resource):
                     query = query.filter(Commands.operation==op)
 
             commands = query.all()
-            results['commands'] = [command.to_dict() for command in commands]
-            if len(results['commands']) == 1:
+
+            if len(commands) == 1:
                 # lerc_api.Command.refresh()
-                log_file_path = results['commands'][0]['log_file_path']
+                # update file_position to report on any transfer progress that's occured
+                update_file_position(commands[0])
+
+                command = commands[0].to_dict()
+                # include any existing error report
+                log_file_path = command['log_file_path']
                 if log_file_path:
                     with open(os.path.join(BASE_DIR, log_file_path), 'r') as f:
-                        results['commands'][0]['error'] = json.loads(f.read())
+                        command['error'] = json.loads(f.read())
                 else: # No error log file
-                    results['commands'][0]['error'] = None
+                    command['error'] = None
+                results['commands'] = [command]
+            else:
+                results['commands'] = [command.to_dict() for command in commands]
 
         return results
 
