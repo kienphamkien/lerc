@@ -207,6 +207,8 @@ def main():
     # root options
     if args.check:
         command = ls.get_command(args.check)
+        if not command:
+            sys.exit()
         print(command)
         if command.status == 'ERROR':
             print("ERROR Report:")

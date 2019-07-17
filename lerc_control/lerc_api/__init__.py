@@ -132,6 +132,11 @@ def parse_lerc_server_query(query_str):
         args[field] = value
     return args
 
+def _to_localtime(timestamp):
+    """Convert server UTC timestamps to local time for user."""
+    if timestamp:
+        return datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S%z').astimezone().strftime('%Y-%m-%d %H:%M:%S%z')
+    return None
 
 class Client():
     """Represents a Live Endpoint Response Client and is used to interact with this LERC.
@@ -149,8 +154,9 @@ class Client():
         self.id = host_dict['id']
         self.status = host_dict['status']
         self.sleep_cycle = host_dict['sleep_cycle']
-        self.last_activity = host_dict['last_activity']
-        self.install_date = host_dict['install_date']
+        # convert to local system time
+        self.last_activity = _to_localtime(host_dict['last_activity'])
+        self.install_date = _to_localtime(host_dict['install_date'])
         self._raw = host_dict
         self.profile = profile
         self._lerc_session = lerc_session(profile=profile)
@@ -172,10 +178,10 @@ class Client():
             self.logger.error("Unexpected result from server : {}".format(r))
             return False
         self.status = r['status']
-        self.last_activity = r['last_activity']
+        self.last_activity = _to_localtime(r['last_activity'])
         self.sleep_cycle = r['sleep_cycle']
         self.version = r['version']
-        self.install_date = r['install_date']
+        self.install_date = _to_localtime(r['install_date'])
         self._raw = r
         return True
 
@@ -341,13 +347,16 @@ class Client():
                 self.logger.error("Containment batch file '{}' does not exist.".format(safe_contain_bat_path))
                 return False
 
+        bat_name = safe_contain_bat_path[safe_contain_bat_path.rfind('/')+1:]
+        # if a file by the same name exists on the client, delete it.
+        self.Run('del {}'.format(bat_name))
+
         self.Download(safe_contain_bat_path)
         containment_command = self.Run(contain_cmd.format(int(self.sleep_cycle)+5), async=True)
 
         # Dummy command to give the containment command enough time to execute before lerc kills it with wmic
-        self.Run("dir")
+        flag_cmd = self.Run("dir")
 
-        bat_name = safe_contain_bat_path[safe_contain_bat_path.rfind('/')+1:]
         kill_command = self.Run('wmic process where "CommandLine Like \'%{}%\'" Call Terminate'.format(bat_name))
 
         # for spot checking
@@ -356,9 +365,7 @@ class Client():
         if not containment_command.wait_for_completion():
             self.logger.error("Containment command failed : {}".format(containment_command))
             return False
-        self.logger.debug("{}".format(containment_command))
-        # XXX used command.evaluated_time to info log containment time
-        self.logger.info("Containment command completed at: {}".format(datetime.now()))
+        self.logger.info("Containment command completed at: {}".format(containment_command.evaluated_time))
 
         self.logger.info("Command {} should return before {} seconds have passed.".format(kill_command.id, self.sleep_cycle))
         if not kill_command.wait_for_completion():
@@ -374,8 +381,9 @@ class Client():
             return False
         results = results.decode('utf-8')
         if 'AllowOutbound' in results:
-            self.logger.warn("AllowOutbound found in firewall status. Containment failed! : Firewall Status:\n{}".format(results))
+            self.logger.error("AllowOutbound found in firewall status. Containment failed! : Firewall Status:\n{}".format(results))
             return False
+        self.logger.info("Containment success confirmed.")
         self.contained = True
         return self.contained
 
@@ -387,13 +395,11 @@ class Client():
         """
         reset_cmd = self.Run("netsh advfirewall reset && netsh advfirewall show allprofiles")
         reset_cmd.wait_for_completion()
-        self.logger.info("Host containment removed at: {}".format(datetime.now()))
+        self.logger.info("Host containment removed at: {}".format(reset_cmd.evaluated_time))
         self.logger.info("Getting firewall status for due diligence..")
         reset_cmd.get_results(file_path = "{}_{}_firewall_reset.txt".format(self.hostname, reset_cmd.id), print_run=False)
         self.contained = False
         return not self.contained
-
-
 
 
 class Command():
@@ -417,6 +423,7 @@ class Command():
         self.async_run = cmd_dict['async_run']
         self.file_position = cmd_dict['file_position']
         self.filesize = cmd_dict['filesize']
+        self.evaluated_time = _to_localtime(cmd_dict['evaluated_time'])
         self._lerc_session = lerc_session(profile=profile)
         self._raw = cmd_dict
         self._error_log = None
@@ -431,6 +438,7 @@ class Command():
             text += "\t  |-> Command: {}\n".format(self.command)
             text += "\t  |-> Async: {}\n".format(self.async_run)
         text += "\tStatus: {}\n".format(self.status)
+        text += "\tEvaluated Time: {}\n".format(self.evaluated_time)
         text += "\tClient Filepath: {}\n".format(self.client_file_path)
         text += "\tServer Filepath: {}\n".format(self.server_file_path)
         text += "\tAnalyst Filepath: {}\n".format(self.analyst_file_path)
@@ -520,6 +528,7 @@ class Command():
         self.file_position = cmd_dict['file_position']
         self.filesize = cmd_dict['filesize']
         self.server_file_path = cmd_dict['server_file_path']
+        self.evaluated_time = _to_localtime(cmd_dict['evaluated_time'])
         if 'error' in cmd_dict:
             self._error_log = cmd_dict['error']
 
