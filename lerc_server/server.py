@@ -800,6 +800,20 @@ class Command(Resource):
 
         return command.to_dict()
 
+class CancelCommand(Resource):
+    def post(self):
+        logger.info("Analyst attempting to cancel a command.")
+        command_id = request.args.get('id')
+        if not command_id:
+            return make_response("Missing arguments", 400)
+        command = Commands.query.filter(Commands.command_id==command_id).one()
+        if command:
+            command.status = cmdStatusTypes.CANCELED
+            db.session.commit()
+            return command.to_dict()
+        return {'status_code':'404',
+                'message': "Not Found",
+                'error': "Command id '{}' does not exist.".format(command_id)}
 
 class AnalystUpload(Resource):
     def post(self):
@@ -942,6 +956,7 @@ api.add_resource(Error, '/error')
 # add analyst api resources
 api.add_resource(Query, '/query')
 api.add_resource(Command, '/command')
+api.add_resource(CancelCommand, '/command/cancel')
 api.add_resource(AnalystUpload, '/command/upload')
 api.add_resource(AnalystDownload, '/command/download')
 
