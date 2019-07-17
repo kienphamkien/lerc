@@ -244,10 +244,9 @@ def CbSensor_search(profile, hostname):
 
 def main(argv):
 
-    parser = argparse.ArgumentParser(description="put file on CB sensor")
-    parser.add_argument('company', choices=auth.FileCredentialStore("response").get_profiles(),
-                        help='specify an environment you want to work with.')
-
+    parser = argparse.ArgumentParser(description="Use existing tools to install LERC")
+    cbR_profiles=auth.FileCredentialStore("response").get_profiles()
+    parser.add_argument('company', choices=cbR_profiles, help='specify an environment you want to work with.')
     parser.add_argument('hostname', help="the name of the host to deploy the client to")
     parser.add_argument('-p', '--package', help="the msi lerc package to install")
     args = parser.parse_args()

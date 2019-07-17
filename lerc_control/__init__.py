@@ -27,10 +27,6 @@ logging.getLogger('lerc_control').setLevel(logging.INFO)
 logger = logging.getLogger('lerc_ui')
 coloredlogs.install(level='INFO', logger=logger)
 
-try:
-    from lerc_control import deploy_lerc
-except:
-    pass
 
 def _parse_collection_scripts(collect_scripts):
     """

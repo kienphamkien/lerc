@@ -4,7 +4,6 @@ import sys
 import time
 import json
 import logging
-import progressbar
 import requests
 from hashlib import md5
 from datetime import datetime
