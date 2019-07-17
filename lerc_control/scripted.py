@@ -2,9 +2,11 @@
 import os
 import logging
 import pprint
-from lerc_control import lerc_api
-from configparser import ConfigParser
 
+from configparser import ConfigParser
+from lerc_control import lerc_api
+
+# GLOBALS #
 logger = logging.getLogger("lerc_control."+__name__)
 
 IGNORED_SECTIONS = ['overview']
@@ -23,6 +25,11 @@ OPTIONAL_OP_KEY_MAP = {'RUN': ['async_run', 'write_results_path', 'print_results
 
 # Get the working lerc_control directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+COMMON_SETUP_COMMANDS = {'RUN': [],
+                         'DOWNLOAD': []}
+COMMON_CLEANUP_COMMANDS = {'RUN': [],
+                           'QUIT': []}
 
 def script_missing_required_keys(config, KEYS):
     for key in KEYS:
@@ -74,15 +81,31 @@ def load_script(script_path):
     except Exception as e:
         logger.error("ConfigParser Error reading '{}' : {}".format(script_path, e))
         return False
+    if script_missing_required_keys(script, REQUIRED_CMD_KEYS):
+        return False
     return script
 
-# Global variables
-COMMON_SETUP_COMMANDS = {'RUN': [],
-                         'DOWNLOAD': []}
-COMMON_CLEANUP_COMMANDS = {'RUN': [],
-                           'QUIT': []}
+def enforce_argument_placeholders(script, placeholders={}):
+    """Some scripts require arguments to execute. These arguments are in the form of string format placeholder keys.
+    Make sure we have all of the arguments for this script. Prompt the user for those arguments if we don't.
 
-def execute_script(lerc, script_path, return_result_commands=False, execute_cleanup_commands=True):
+    :param ConfigParser script: A loaded lerc script
+    :param dict placeholders: A dictionary of placeholders we already have (if any)
+    :return: placeholders
+    """
+    logger.debug("Enforcing argument placeholders")
+    args_needed = []
+    required_args = script['overview']['required_arguments'].split(',') if script.has_option('overview', 'required_arguments') else None
+    if required_args:
+        args_needed = [arg for arg in required_args if arg not in placeholders.keys()]
+    for arg in args_needed:
+        placeholders[arg] = input("Script needs argument {}:".format(arg))
+    return placeholders
+    # leaving this here in case I decide to do the enforcement based on {whatever} is in certain command fields
+    #fields = [i[1] for i in Formatter().parse(write_results_path) if i[1] is not None]
+
+
+def execute_script(lerc, script_path, return_result_commands=False, execute_cleanup_commands=True, placeholders={}):
     """Execute a script on this host.
 
     :param lerc_api.Client lerc: A lerc_api.Client object.
@@ -95,15 +118,12 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
     if not isinstance(lerc, lerc_api.Client):
         logger.error("Argument is of type:{} instead of type lerc_api.Client".format(type(lerc)))
         return False
-
-    config = lerc._ls.get_config
-    profile = lerc._ls.profile
-    #default_client_dir = config[profile]['client_working_dir']
  
     script = load_script(script_path)
-
-    if script_missing_required_keys(script, REQUIRED_CMD_KEYS):
-        return False
+    if 'HOSTNAME' not in placeholders:
+        # This is a generic, common placeholder for writing result files
+        placeholders['HOSTNAME'] = lerc.hostname
+    placeholders = enforce_argument_placeholders(script, placeholders)
 
     command_history = {}
     commands = [cmd for cmd in script.sections() if cmd not in IGNORED_SECTIONS]
@@ -133,13 +153,13 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
         if 'get_results' in script[command]:
             get_results = script[command].getboolean('get_results')
         if 'write_results_path' in script[command]:
-            write_results_path = script[command]['write_results_path'].format(HOSTNAME=lerc.hostname)
+            write_results_path = script[command]['write_results_path'].format(**placeholders)
         if 'common_setup_command' in script[command]:
             is_common_setup_command = script[command].getboolean('common_setup_command')
         if 'common_cleanup_command' in script[command]:
             is_common_cleanup_command = script[command].getboolean('common_cleanup_command')
         if 'message' in script[command]:
-            message = script[command]['message'].format(HOSTNAME=lerc.hostname)
+            message = script[command]['message'].format(**placeholders)
 
         if op == 'RUN':
             async_run = False
@@ -147,7 +167,7 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
                 async_run = script[command].getboolean('async_run')
             if 'print_results' in script[command]:
                 print_results = script[command].getboolean('print_results')
-            run_string = script[command]['command']
+            run_string = script[command]['command'].format(**placeholders)
             if is_common_setup_command:
                 cmd = [cmd for cmd in COMMON_SETUP_COMMANDS['RUN'] if run_string == cmd.command]
                 if cmd:
@@ -176,8 +196,8 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
         elif op == 'DOWNLOAD':
             client_file_path = None
             if 'client_file_path' in script[command]:
-                client_file_path = script[command]['client_file_path']
-            file_path = script[command]['file_path']
+                client_file_path = script[command]['client_file_path'].format(**placeholders)
+            file_path = script[command]['file_path'].format(**placeholders)
             if not os.path.exists(file_path):
                 old_fp = file_path
                 if file_path[0] == '/':
@@ -210,10 +230,7 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
             if message:
                 logger.info("SCRIPT MESSAGE: {}".format(message))
         elif op == 'UPLOAD':
-            path = script[command]['path']
-            # if the script doesn't specify the full path, add default client working dir
-            #if '\\' not in path:
-                #path = default_client_dir + path
+            path = script[command]['path'].format(**placeholders)
             cmd = lerc.Upload(path)
             command_history[command] = cmd
             command_history[command].get_the_results = get_results
@@ -225,7 +242,7 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
         elif op == 'QUIT':
             if is_common_cleanup_command and not execute_cleanup_commands:
                 if not COMMON_CLEANUP_COMMANDS['QUIT']:
-                    COMMON_CLEANUP_COMMANDS['QUIT'].append(run_string)
+                    COMMON_CLEANUP_COMMANDS['QUIT'].append(True)
                 continue
             cmd = lerc.Quit()
             command_history[command] = cmd
@@ -251,3 +268,5 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
     if return_result_commands:
         return result_commands
     return command_history
+
+# XXX Maybe create a LERC Script class??
