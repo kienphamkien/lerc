@@ -7,6 +7,7 @@ import pprint
 import logging
 import configparser
 
+from lerc_control.scripted import load_script, execute_script
 from lerc_control import lerc_api
 
 logger = logging.getLogger("lerc_control."+__name__)
@@ -14,7 +15,14 @@ logger = logging.getLogger("lerc_control."+__name__)
 # Get the working lerc_control directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+def get_process_memory(lerc, pid, script_path='scripts/get_process_memory.ini'):
+    return execute_script(lerc, script_path, placeholders={'PID': pid})
+
+def get_process_memstrings(lerc, pid, script_path='scripts/get_process_memstrings.ini'):
+    return execute_script(lerc, script_path, placeholders={'PID': pid})
+
 def get_directory(lerc, dir_path, async_run=False):
+    # TODO XXX Convert this into a script
     """Compress a directory with 7zip and upload the compressed result.
 
     :param lerc_api.Client lerc: A lerc_api.Client
@@ -72,13 +80,25 @@ def get_directory(lerc, dir_path, async_run=False):
         logger.info("Wrote {}_dirOfInterest.7z".format(lerc.hostname))
     return commands
 
+def collect_registry_key(client, reg_path):
+    """Collect all of the values at this registry key.
 
-def collect_registry(client, reg_path):
-    """Collet the registry data at the registry value path.
+    :param str reg_path: Path the reg key
+    :param lerc_api.Client client: A lerc client object to work with.
+    """
+    cmd = client.Run('reg query "{}"'.format(reg_path))
+    logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
+    return cmd
+
+def collect_registry_key_value(client, reg_path):
+    """Collet the registry data at the specific registry path key value. 
+
+    :param str reg_path: Registry key path with specific key value appended like so: path-to-key+"\\key_value"
+    :param lerc_api.Client client: A lerc client object to work with.
     """
     reg_key = reg_path[reg_path.rfind('\\')+1:]
     reg_path = reg_path[:reg_path.rfind('\\')]
-    cmd = 'REG QUERY "{}" /v "{}"'.format(reg_path, reg_key)
+    cmd = 'reg query "{}" /v "{}"'.format(reg_path, reg_key)
     cmd = client.Run(cmd)
     logger.info("Issued command:{} to '{}' on LERC:{}".format(cmd.id, cmd.command, client.hostname))
     return cmd 
@@ -98,10 +118,12 @@ def multi_collect(client, collect_file):
     files = config['files']
     dirs = config['directories']
     regValues = config['registry_values']
+    regKeys = config['registry_keys']
 
     commands = {'files': [],
                 'directories': [],
-                'registry_values': []}
+                'registry_values': [],
+                'registry_keys': []}
 
     for f in files:
         cmd = client.Upload(files[f])
@@ -109,7 +131,10 @@ def multi_collect(client, collect_file):
         commands['files'].append(cmd)
 
     for reg in regValues: 
-        commands['registry_values'].append(collect_registry(client, regValues[reg]))
+        commands['registry_values'].append(collect_registry_key_value(client, regValues[reg]))
+
+    for reg in regKeys:
+        commands['registry_keys'].append(collect_registry_key(client, regKeys[reg]))
 
     for d in dirs:
         commands['directories'].append(get_directory(client, dirs[d], async_run=True))
@@ -120,8 +145,8 @@ def multi_collect(client, collect_file):
         logger.info("Getting results for '{}' collection.".format(cmd.client_file_path))
         filename = cmd.client_file_path[cmd.client_file_path.rfind('\\')+1:]
         filename = filename.replace(' ', '_')
-        if cmd.get_results(file_path='{}_file_{}'.format(client.hostname, filename)):
-            logger.info("+ wrote '{}_file_{}'".format(client.hostname, filename))
+        if cmd.get_results(file_path='{}_{}_file_{}'.format(client.hostname, cmd.id, filename)):
+            logger.info("+ wrote '{}_{}_file_{}'".format(client.hostname, cmd.id, filename))
 
     for cmd in commands['registry_values']:
         rvalue = [r for r in [regValues[r] for r in regValues] if r[r.rfind('\\')+1:] in cmd.command and r[:r.rfind('\\')] in cmd.command][0]
@@ -130,8 +155,17 @@ def multi_collect(client, collect_file):
         logger.info("Getting results of '{}' collections..".format(rvalue))
         rvalue_name = rvalue[rvalue.rfind('\\')+1:]
         rvalue_name = rvalue_name.replace(' ','_')
-        if cmd.get_results(print_run=False, file_path='{}_reg_{}'.format(client.hostname, rvalue_name)):
-            logger.info("+ wrote '{}_reg_{}'".format(client.hostname, rvalue_name))
+        if cmd.get_results(print_run=False, file_path='{}_{}_reg_{}'.format(client.hostname, cmd.id, rvalue_name)):
+            logger.info("+ wrote '{}_{}_reg_{}'".format(client.hostname, cmd.id, rvalue_name))
+
+    for cmd in commands['registry_keys']:
+        rkey = [r for r in [regKeys[r] for r in regKeys] if r[r.rfind('\\')+1:] in cmd.command and r[:r.rfind('\\')] in cmd.command][0]
+        logger.info("Waiting for command {} to complete..".format(cmd.id))
+        cmd.wait_for_completion()
+        logger.info("Getting results of '{}' collections..".format(rkey))
+        rkey_name = rkey[rkey.rfind('\\')+1:]
+        if cmd.get_results(print_run=False, file_path='{}_{}_reg_{}'.format(client.hostname, cmd.id, rkey_name)):
+            logger.info("+ wrote '{}_{}_reg_{}'".format(client.hostname, cmd.id, rkey_name))
 
     for cmd in commands['directories']:
         directory = [d for d in [dirs[d] for d in dirs] if d in cmd.command][0]
@@ -139,8 +173,8 @@ def multi_collect(client, collect_file):
         cmd.wait_for_completion()
         dirname = directory[directory.rfind('\\')+1:].replace(' ','_')
         logger.info("Getting results of '{}' collection..".format(cmd.client_file_path))
-        if cmd.get_results(file_path='{}_dir_{}.7z'.format(client.hostname, dirname)):
-            logger.info("+ wrote '{}_dir_{}'".format(client.hostname, dirname))
+        if cmd.get_results(file_path='{}_{}_dir_{}.7z'.format(client.hostname, cmd.id, dirname)):
+            logger.info("+ wrote '{}_{}_dir_{}'".format(client.hostname, cmd.id, dirname))
 
     return True
 

@@ -14,7 +14,7 @@ from setuptools import setup, find_packages
 from codecs import open
 from os import path
 
-__version__ = "0.0.18"
+__version__ = "0.0.19"
 description = "Libraries and utilities for controling and working with Live Endpoint Response Clients."
 
 here = path.abspath(path.dirname(__file__))
@@ -93,7 +93,7 @@ setup(
     # your project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    install_requires=['coloredlogs', 'python-dateutil', 'requests', 'rotl>=0.0.5'],
+    install_requires=['coloredlogs', 'python-dateutil', 'requests', 'rotl>=0.0.5', 'tqdm'],
 
     entry_points={
         'console_scripts': ['lerc_ui=lerc_control:main'],

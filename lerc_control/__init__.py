@@ -91,6 +91,7 @@ def main():
     parser.add_argument('-c', '--check', action="store", help="check on a specific command id")
     parser.add_argument('-r', '--resume', action='store', help="resume a pending command id") 
     parser.add_argument('-g', '--get', action='store', help="get results for a command id")
+    parser.add_argument('-k', '--cancel', action='store', help="Tell the server to CANCEL this command.")
 
     subparsers = parser.add_subparsers(dest='instruction') #title='subcommands', help='additional help')
 
@@ -131,8 +132,15 @@ def main():
     # collect
     parser_collect = subparsers.add_parser('collect', help="Default (no arguments): perform a full lr.exe collection")
     parser_collect.add_argument('-d', '--directory', action='store', help="Compress contents of a client directory and collect")
+    # NOTE for file-path gets picked up by upload parser and handed of as basic upload command
     parser_collect.add_argument('-f', '--file-path', action='store', help="Path to file on client you want to collect")
+    parser_collect.add_argument('-rkv', '--reg-key-value', action='store', help="Collet the registry data at the specific registry key value path. Format:\
+                                                                               HKLM\\software\\microsoft\\windows\\currentversion\\run\\SPECIFIC-KEY")
+    parser_collect.add_argument('-rk', '--reg-key', action='store', help="Collet all registry value data at the specific registry key path. Format:\
+                                                                               HKLM\\software\\wow6432node\\microsoft\\windows\\currentversion\\run")
     parser_collect.add_argument('-mc', '--multi-collect', action='store', help="Path to a multiple collection file")
+    parser_collect.add_argument('-pm', '--process-memory', action='store', help='Use procdump to collect memory for this PID')
+    parser_collect.add_argument('-pms','--proc-mem-strings', action='store', help='Use strings2 to collect process memory strings for this PID')
     parser_collect.add_argument('hostname', help="the host you'd like to work with")
     # Make collect argument options of collection scripts
     collect_scripts = []
@@ -222,6 +230,24 @@ def main():
         if command:
             print(command)
         sys.exit()
+    elif args.cancel:
+        cmds = args.cancel.split(',')
+        # enumerate all commands that span CMD_ID-CMD_ID
+        for cmd in cmds:
+            if isinstance(cmd, str) and '-' in cmd:
+                if cmd.count('-') != 1:
+                    logger.error("Incorrect command id format string. Must be: 'int' OR 'int,int' OR 'int-int' OR 'int[,int,int-int]'")
+                    sys.exit(1)
+                first, second = cmd.split('-')[:2]
+                # +1 to make it inclusive
+                cmds.extend(list(range(int(first), int(second)+1)))
+                cmds.remove(cmd)
+        for cmd in cmds:
+            command = ls.get_command(cmd)
+            if command:
+                command.cancel()
+                print(command)
+        sys.exit()
 
     if args.instruction == 'query':
         if args.query == 'fields':
@@ -239,6 +265,8 @@ def main():
         if args.return_commands: 
             query['rc'] = True
         results = ls.query(**query)
+        if not results:
+            sys.exit()
         clients = [ c.get_dict for c in results['clients']]
         fmt = [ ('ID', 'id', 5),
                 ('Hostname', 'hostname', 20),
@@ -368,6 +396,7 @@ def main():
 
     # collections
     if args.instruction == 'collect':
+        default_full_collect = True
         # From argparse Namespace, get collection script names if the argument is set
         collect_scripts = [carg for carg, value in vars(args).items() if carg.startswith('collect_') and value is True]
 
@@ -380,15 +409,17 @@ def main():
             logging.getLogger('lerc_control.lerc_api').setLevel(logging.WARNING)
         if args.directory:
             commands = collect.get_directory(client, args.directory)
-        elif args.multi_collect:
+            default_full_collect = False
+        if args.multi_collect:
             collect.multi_collect(client, args.multi_collect)
-        elif args.file_path:
-            cmd = client.Upload(args.file_path)
-            logger.info("Issued {} to collect file : {}".format(cmd.id, args.file_path))
-            logging.getLogger('lerc_control.lerc_api').setLevel(logging.INFO)
-            cmd.wait_for_completion()
-            cmd.get_results()
-        elif collect_scripts:
+            default_full_collect = False
+        if args.process_memory:
+            collect.get_process_memory(client, args.process_memory)
+            default_full_collect = False
+        if args.proc_mem_strings:
+            collect.get_process_memstrings(client, args.proc_mem_strings)
+            default_full_collect = False
+        if collect_scripts:
             cmds = []
             for script in collect_scripts:
                 try:
@@ -405,7 +436,29 @@ def main():
             if len(cleanup_cmds['QUIT']) > 0:
                 cmd = client.Quit()
                 logger.info("Issued command {} for client to uninstall itself from host.".format(cmd.id))
-        else:
+            default_full_collect = False
+        # Any arguments where we turn on lerc_api info logger should go below
+        if args.file_path:
+            cmd = client.Upload(args.file_path)
+            logger.info("Issued {} to collect file : {}".format(cmd.id, args.file_path))
+            logging.getLogger('lerc_control.lerc_api').setLevel(logging.INFO)
+            cmd.wait_for_completion()
+            cmd.get_results()
+            default_full_collect = False
+        if args.reg_key_value:
+            reg_value = args.reg_key_value[args.reg_key_value.rfind('\\')+1:].replace(' ','_')
+            logging.getLogger('lerc_control.lerc_api').setLevel(logging.INFO)
+            cmd = collect.collect_registry_key_value(client, args.reg_key_value)
+            cmd.get_results(file_path="{}_{}_reg_{}.txt".format(client.hostname, cmd.id, reg_value))
+            default_full_collect = False
+        if args.reg_key:
+            reg_key = args.reg_key[args.reg_key.rfind('\\')+1:].replace(' ','_')
+            logging.getLogger('lerc_control.lerc_api').setLevel(logging.INFO)
+            cmd = collect.collect_registry_key(client, args.reg_key)
+            cmd.wait_for_completion()
+            cmd.get_results(file_path="{}_{}_reg_{}.txt".format(client.hostname, cmd.id, reg_key))
+            default_full_collect = False
+        if default_full_collect:
             collect.full_collection(client)
         sys.exit(0)
 

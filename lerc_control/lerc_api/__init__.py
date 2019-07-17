@@ -10,6 +10,7 @@ from hashlib import md5
 from datetime import datetime
 from contextlib import closing
 from configparser import ConfigParser
+from tqdm import tqdm
 
 # Get the working lerc_control directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -446,24 +447,6 @@ class Command():
     def get_dict(self):
         return self._raw
 
-    def refresh(self, cmd_dict=None):
-        """Query the lerc server and update this command with the latest data."""
-        if not cmd_dict:
-            r = requests.get(self._ls.server+'/query', cert=self._ls.cert, params={'cmd_id': self.id, 'rc': True}).json()
-            if 'commands' in r and len(r['commands']) == 1:
-                cmd_dict = r['commands'][0]
-            else:
-                self.logger.warning("No command by id:{}".format(self.id))
-                return False
-        if self.status != cmd_dict['status']:
-            self.logger.debug("Command {} status changed from {} to {}".format(self.id, self.status, cmd_dict['status']))
-            self.status = cmd_dict['status']
-        self.file_position = cmd_dict['file_position']
-        self.filesize = cmd_dict['filesize']
-        self.server_file_path = cmd_dict['server_file_path']
-        if 'error' in cmd_dict:
-            self._error_log = cmd_dict['error']
-
     @property
     def preparing(self):
         if self.status == 'PREPARING':
@@ -484,7 +467,7 @@ class Command():
 
     @property
     def canceled(self):
-        if self.status == 'CANCLED':
+        if self.status == 'CANCELED':
             return True
         return False
 
@@ -505,6 +488,41 @@ class Command():
         if self.status == 'UNKNOWN':
             return True
         return False
+
+    def cancel(self):
+        """Cancel this command with the server if it's yet to be fetched.
+        """
+        self.refresh()
+        if self.canceled:
+            self.logger.warning("Command {} is already canceled.".format(self.id))
+            return True
+        if self.complete or self.errored or self.unknown:
+            self.logger.info("Command has already been evaluated and left in '{}' state.".format(self.status))
+            return False
+        self.logger.info("Attempting to cancel command {} ; currently in '{}' state.".format(self.id, self.status))
+        r = requests.post(self._ls.server+'/command/cancel', cert=self._ls.cert, params={'id': self.id}).json()
+        if 'error' in r:
+            self.logger.warning(r['error'])
+        self.status = r['status']
+        return self.canceled
+
+    def refresh(self, cmd_dict=None):
+        """Query the lerc server and update this command with the latest data."""
+        if not cmd_dict:
+            r = requests.get(self._ls.server+'/query', cert=self._ls.cert, params={'cmd_id': self.id, 'rc': True}).json()
+            if 'commands' in r and len(r['commands']) == 1:
+                cmd_dict = r['commands'][0]
+            else:
+                self.logger.warning("No command by id:{}".format(self.id))
+                return False
+        if self.status != cmd_dict['status']:
+            self.logger.debug("Command {} status changed from {} to {}".format(self.id, self.status, cmd_dict['status']))
+            self.status = cmd_dict['status']
+        self.file_position = cmd_dict['file_position']
+        self.filesize = cmd_dict['filesize']
+        self.server_file_path = cmd_dict['server_file_path']
+        if 'error' in cmd_dict:
+            self._error_log = cmd_dict['error']
 
     def stream_file(self, file_path, position=0):
         """Stream a file to the lerc server that the server needs to for this command."""
@@ -554,8 +572,7 @@ class Command():
         r = requests.get(self._ls.server+'/command/download', cert=self._ls.cert, params=arguments).json()
         return r
 
-
-    def get_results(self, file_path=None, chunk_size=None, print_run=True, return_content=False, position=0):
+    def get_results(self, file_path=None, chunk_size=None, print_run=True, return_content=False, position=0, display_transfer_progress=True):
         """Get any results available for a command. If cid is None, any cid currently assigned to the lerc_session will be used.
 
         :param int cid: (optional) The Id of a command to work with.
@@ -564,6 +581,7 @@ class Command():
         :param boolean print_run: (optionl default:True) If True, print Run command results to console
         :param boolean return_content: (content) Do not write the results to a file, return the results as a byte string
         :param int position: (optional) For manually specifing byte position
+        :param bool display_transfer_progress: (optional) Print a progress bar to the console if True.
         :return: If return_content==True, the raw content will be returned as a byte string, else the command is return on success. 
         """
         # make sure the command is up-to-date
@@ -597,10 +615,19 @@ class Command():
                 self.logger.warn("Low Network Testosterone - One byte discrepancy: CMD:{} - ServerDB:{} - local:{} - status:{}".format(self.id, self.filesize, position, self.status))
                 self.logger.info("Result file download complete.")
                 return True
-            self.logger.info("Already have {} out of {} bytes. Resuming download from server.."
-                             .format(position, self.filesize))
+            self.logger.info("Already have {} out of {} bytes. Resuming download from server..".format(position, self.filesize))
         else:
             self.logger.debug("getting results for {}".format(self.id))
+
+        # XXX Could figure out a way to safely display run result transfer progress if not print_run and not return_content and display_transfer_progress
+        #if self.operation == 'RUN' and (print_run or return_content):
+            #display_transfer_progress = False
+        pbar = None
+        if display_transfer_progress and self.operation in ['DOWNLOAD', 'UPLOAD'] and self.filesize > 0:
+            desc = desc = "CMD:{} - Streaming results from server".format(self.id)
+            pbar = tqdm(total=self.filesize, desc=desc, initial=position)
+        else:
+            display_transfer_progress = False
 
         arguments = {'position': position, 'cid': self.id}
         headers = {"Accept-Encoding": '0'}
@@ -628,11 +655,19 @@ class Command():
                             if self.operation == 'RUN' and print_run:
                                 print(data.decode('utf-8'))
                             f.write(data)
+                            if display_transfer_progress:
+                                try:
+                                    position += len(data)
+                                    pbar.update(position - pbar.n)
+                                except Exception as e:
+                                    self.logger.warn("Caught exception updating progressbar: {}".format(e))
                         final_chunk = r.raw.read(remaining_bytes)
                         if self.operation == 'RUN' and print_run:
                             print(final_chunk.decode('utf-8'))
                         f.write(final_chunk)
                         f.close()
+                        if display_transfer_progress:
+                            pbar.update(position + len(final_chunk) - pbar.n)
             except Exception as e:
                 self.logger.error(str(e))
                 return False
@@ -640,6 +675,9 @@ class Command():
         # Did we get the entire result file?
         filesize = os.stat(file_path).st_size
         if self.filesize == filesize:
+            if display_transfer_progress:
+                pbar.close()
+                del pbar
             self.logger.info("Result file download complete. Wrote {}.".format(file_path))
             return True
         else:
@@ -709,10 +747,8 @@ class Command():
                 self.prepare_server()
             elif self.started:
                 if display_transfer_progress and self.operation in ['DOWNLOAD', 'UPLOAD'] and self.filesize > 0 and pbar is None:
-                    desc = desc = "CMD:{} - {} progress: [".format(self.id, self.operation)
-                    pbar = progressbar.ProgressBar(maxval=self.filesize, widgets=[progressbar.Bar("=", desc, ']'), ' ', progressbar.Percentage()])
-                    pbar.term_width = int(pbar.term_width / 2)
-                    pbar.start()
+                    desc = "CMD:{} - {} progress".format(self.id, self.operation)
+                    pbar = tqdm(total=self.filesize, desc=desc, initial=self.file_position)
                 if self._error_log is not None and error_reported != self._error_log:
                     error_reported = self._error_log
                     errtime = self._error_log['time']
@@ -723,11 +759,11 @@ class Command():
                     start_logged = True
                 if pbar:
                     try:
-                        pbar.update(self.file_position)
+                        pbar.update(self.file_position - pbar.n)
                     except ValueError as e:
                         if self.file_position == self.filesize + 1:
                             self.logger.debug("One byte discrepancy ignored.")
-                            pbar.update(self.filesize)
+                            pbar.update(self.filesize - pbar.n)
                         else:
                             self.logger.warn("{} - file_postion:{} filesize:{}".format(e, self.file_position, self.filesize))
                     except Exception as e:
@@ -737,7 +773,8 @@ class Command():
             elif self.complete:
                 self.logger.info("Command {} COMPLETE.".format(self.id))
                 if pbar:
-                    pbar.finish()
+                    pbar.update(self.filesize - pbar.n)
+                    pbar.close()
                 return True
             else: # Only here if command in UNKNOWN or ERROR state
                 self.logger.info("Command {} state: {}.".format(self.id, self.status))
@@ -835,7 +872,8 @@ class lerc_session():
             if 'client_id_list' in r:
                 results['client_id_list'] = r['client_id_list']
             return results
-        return r
+        self.logger.warning("Got unexpected query result from server: {}".format(r))
+        return False
 
     def get_command(self, cid):
         """ Get a command by it's id.
@@ -843,6 +881,15 @@ class lerc_session():
         :param int cid: The id of a lerc command.
         :return: A lerc_api.Command object or False
         """
+        if isinstance(cid, str):
+            try:
+                cid = int(cid)
+            except ValueError:
+                self.logger.error("'{}' is not a valid command id.".format(cid))
+                return False
+        if not isinstance(cid, int) or cid <= 0:
+            self.logger.warning("'{}' is not a valid command id.".format(cid))
+            return False
         r = self.query(cmd_id=cid, rc=True)
         # querying by command id should always return a single command
         if 'commands' in r and len(r['commands']) == 1:

@@ -245,7 +245,7 @@ def CbSensor_search(profile, hostname):
 def main(argv):
 
     parser = argparse.ArgumentParser(description="put file on CB sensor")
-    parser.add_argument('company', choices=auth.CredentialStore("response").get_profiles(),
+    parser.add_argument('company', choices=auth.FileCredentialStore("response").get_profiles(),
                         help='specify an environment you want to work with.')
 
     parser.add_argument('hostname', help="the name of the host to deploy the client to")
