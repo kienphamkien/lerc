@@ -197,8 +197,31 @@ def main():
         logging.getLogger('lerc_control').setLevel(logging.DEBUG)
         coloredlogs.install(level='DEBUG', logger=logger)
 
-    # a local lerc_session will be needed to go any further
+    # our local lerc_session
     ls = lerc_api.lerc_session(profile=args.environment)
+
+    # root options
+    if args.check:
+        command = ls.get_command(args.check)
+        print(command)
+        if command.status == 'ERROR':
+            print("ERROR Report:")
+            pprint.pprint(command.get_error_report(), indent=5)
+        sys.exit()
+    elif args.get:
+        logger.info("Asking for command results for CMD={}".format(args.get))
+        command = ls.get_command(args.get)
+        if command:
+            logger.info("Getting results for {} command id {} issued to {}".format(command.operation, command.id, command.hostname))
+            command.get_results(chunk_size=16384)
+            print(command)
+        sys.exit()
+    elif args.resume:
+        command = ls.get_command(args.resume)
+        command.wait_for_completion()
+        if command:
+            print(command)
+        sys.exit()
 
     if args.instruction == 'query':
         if args.query == 'fields':
@@ -247,27 +270,6 @@ def main():
             print() 
         sys.exit()
 
-    # root options
-    if args.check:
-        command = ls.get_command(args.check)
-        print(command)
-        if command.status == 'ERROR':
-            print("ERROR Report:")
-            pprint.pprint(command.get_error_report(), indent=5)
-        sys.exit()
-    elif args.get:
-        command = ls.get_command(args.get)
-        if command:
-            command.get_results(chunk_size=16384)
-            print(command)
-        sys.exit()
-    elif args.resume:
-        command = ls.get_command(args.resume)
-        command.wait_for_completion()
-        if command:
-            print(command)
-        sys.exit()
-
     # if we're here, then an instructions been specified and the args.hostname is a thing
     client = ls.get_host(args.hostname)
     if isinstance(client, list):
@@ -292,7 +294,7 @@ def main():
         logger.info("Attempting to deploy lerc with CarbonBlack..")
         try:
             from cbapi import auth
-            from deploy_lerc import deploy_lerc, CbSensor_search
+            from lerc_control.deploy_lerc import deploy_lerc, CbSensor_search
         except:
             logger.error("Failed to import deployment functions from lerc_control.deploy_lerc OR cbapi.")
             sys.exit(1)
@@ -365,7 +367,6 @@ def main():
         sys.exit(0)
 
     # collections
-    profile=args.environment if args.environment else 'default'
     if args.instruction == 'collect':
         # From argparse Namespace, get collection script names if the argument is set
         collect_scripts = [carg for carg, value in vars(args).items() if carg.startswith('collect_') and value is True]
@@ -504,7 +505,6 @@ def main():
     if not cmd:
         sys.exit(1)
 
-    start_time = time.time() 
     if not cmd.wait_for_completion():
         logger.warning("{} (ID:{}) command went to a {} state. Exiting.".format(cmd.operation, cmd.id, cmd.status))
         sys.exit(1)

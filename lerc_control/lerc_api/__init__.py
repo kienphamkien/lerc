@@ -4,6 +4,7 @@ import sys
 import time
 import json
 import logging
+import progressbar
 import requests
 from hashlib import md5
 from datetime import datetime
@@ -418,6 +419,7 @@ class Command():
         self.filesize = cmd_dict['filesize']
         self._lerc_session = lerc_session(profile=profile)
         self._raw = cmd_dict
+        self._error_log = None
 
     def __str__(self):
         text = "\n\t----------------------------\n"
@@ -453,10 +455,56 @@ class Command():
             else:
                 self.logger.warning("No command by id:{}".format(self.id))
                 return False
-        self.status = cmd_dict['status']
+        if self.status != cmd_dict['status']:
+            self.logger.debug("Command {} status changed from {} to {}".format(self.id, self.status, cmd_dict['status']))
+            self.status = cmd_dict['status']
         self.file_position = cmd_dict['file_position']
         self.filesize = cmd_dict['filesize']
         self.server_file_path = cmd_dict['server_file_path']
+        if 'error' in cmd_dict:
+            self._error_log = cmd_dict['error']
+
+    @property
+    def preparing(self):
+        if self.status == 'PREPARING':
+            return True
+        return False
+
+    @property
+    def complete(self):
+        if self.status == 'COMPLETE':
+            return True
+        return False
+
+    @property
+    def started(self):
+        if self.status == 'STARTED':
+            return True
+        return False
+
+    @property
+    def canceled(self):
+        if self.status == 'CANCLED':
+            return True
+        return False
+
+    @property
+    def pending(self):
+        if self.status == 'PENDING':
+            return True
+        return False
+
+    @property
+    def errored(self):
+        if self.status == 'ERROR':
+            return True
+        return False
+
+    @property
+    def unknown(self):
+        if self.status == 'UNKNOWN':
+            return True
+        return False
 
     def stream_file(self, file_path, position=0):
         """Stream a file to the lerc server that the server needs to for this command."""
@@ -483,13 +531,17 @@ class Command():
                     yield data
                     data = f.read(4096)
         try:
-            r = requests.post(self._ls.server+'/command/upload', cert=self._ls.cert, params=arguments, data=gen()).json()
+            r = requests.post(self._ls.server+'/command/upload', cert=self._ls.cert, params=arguments, data=gen())
         except requests.exceptions.ConnectionError as e:
             self.logger.error("Connection Error when uploading to server (using a proxy? - https://github.com/IntegralDefense/lerc/issues/33): {}".format(e))
             return False
+        if r.status_code != 200:
+            self.logger.warn("Received {} response from server: {}".format(r.status_code, r.text))
+            return False
+        r = r.json()
         if 'error' in r:
             self.logger.error("{}".format(r['error']))
-            return r
+            return False
         if 'warn' in r:
             self.logger.info(r['warn'])
         self.refresh(cmd_dict=r)
@@ -541,6 +593,10 @@ class Command():
         if os.path.exists(file_path):
             statinfo = os.stat(file_path)
             position = statinfo.st_size
+            if self.filesize == position+1:
+                self.logger.warn("Low Network Testosterone - One byte discrepancy: CMD:{} - ServerDB:{} - local:{} - status:{}".format(self.id, self.filesize, position, self.status))
+                self.logger.info("Result file download complete.")
+                return True
             self.logger.info("Already have {} out of {} bytes. Resuming download from server.."
                              .format(position, self.filesize))
         else:
@@ -587,44 +643,105 @@ class Command():
             self.logger.info("Result file download complete. Wrote {}.".format(file_path))
             return True
         else:
+            # XXX TODO Sometimes there is a 1 byte descrpancy that causes a recursive loop
             self.logger.info("Data stream closed prematurely. Have {}/{} bytes. Trying to resume..".
                               format(filesize, self.filesize))
             self.get_results()
         return None
 
-    def wait_for_completion(self):
+    def prepare_server(self):
+        """If a command is in the preparing state, the server needs a file streamed to it before it can proceed. 
+        This should only be neccessary for download operations.
+        """
+        if not self.preparing:
+            self.logger.warn("{} doesn't need preparing right now.".format(self.id))
+            return True
+        if self.operation != "DOWNLOAD":
+            self.logger.error("Command {} is PREPARING but we don't know what for.".format(self.id))
+            return False
+        self.logger.info("Command {} PREPARING. Streaming file to server..".format(self.id))
+        # stream file to server
+        if not self.analyst_file_path:
+            self.logger.error("analyst_file_path is not defined")
+            return False
+        return self.stream_file(self.analyst_file_path, self.file_position)
+
+    def progress(self):
+        """Report on the progress of this command by returning True if the command is in a healthy state and False if not.
+        Progress the command forward if the server needs a file (the command is in a preparing state).
+        """
+        self.logger.debug("Progressing {}".format(self.id))
+        self.refresh()
+        if self.preparing:
+            return self.prepare_server()
+        elif self.pending or self.started or self.complete:
+            return True
+        elif self.errored or self.unknown:
+            return False
+        else:
+            self.logger.critical("Unknown command state: {}".format(self.get_dict))
+            return False
+
+    def wait_for_completion(self, display_transfer_progress=True):
         """Wait for this command to complete by continously querying for its status to change to 'COMPLETE' with the server.
 
         :return: True when a command's status changes to 'COMPLETE'. 
         """
+        pbar = None
+        error_reported = None
+        start_logged = pending_logged = False
+        sleep_counter = 0
         while True:
+            if sleep_counter % 10 == 0:
+                # essentially, log again every 10 seconds
+                start_logged = pending_logged = False
             self.refresh()
             tmp_client = self._ls.get_client(self.client_id)
-            #if tmp_client.status != 'ONLINE' and tmp_client.status != 'BUSY':
             if not tmp_client.is_online and not tmp_client.is_busy:
                 self.logger.warning("This command's LERC ({} (ID:{})) has gone to a status of '{}'".format(self.hostname, self.client_id, tmp_client.status))
-            if self.status == 'PENDING': # we wait
-                self.logger.info("Command {} PENDING. Checking again in 10 seconds..".format(self.id))
-                time.sleep(10)
-            elif self.status == 'PREPARING': # the command needs something from us (file)
-                if self.operation != "DOWNLOAD":
-                    self.logger.error("Command {} is PREPARING but we don't know what for.".format(self.id))
-                    return False
-                self.logger.info("Command {} PREPARING. Streaming file to server..".format(self.id))
-                # function to stream file to server
-                if not self.analyst_file_path:
-                    self.logger.error("Can't resume upload to server, analyst_file_path is not defined")
-                    return False
-                self.stream_file(self.analyst_file_path, self.file_position)
-            elif self.status == 'STARTED':
-                self.logger.info("Command {} STARTED. Checking again in 10 seconds..".format(self.id))
-                time.sleep(10)
-            elif self.status == 'COMPLETE':
+            if self.pending: # we wait
+                if not pending_logged:
+                    self.logger.info("Command {} PENDING..".format(self.id))
+                    pending_logged = True
+                time.sleep(1)
+                sleep_counter += 1
+            elif self.preparing: # the server needs something from us for this command (file)
+                self.prepare_server()
+            elif self.started:
+                if display_transfer_progress and self.operation in ['DOWNLOAD', 'UPLOAD'] and self.filesize > 0 and pbar is None:
+                    desc = desc = "CMD:{} - {} progress: [".format(self.id, self.operation)
+                    pbar = progressbar.ProgressBar(maxval=self.filesize, widgets=[progressbar.Bar("=", desc, ']'), ' ', progressbar.Percentage()])
+                    pbar.term_width = int(pbar.term_width / 2)
+                    pbar.start()
+                if self._error_log is not None and error_reported != self._error_log:
+                    error_reported = self._error_log
+                    errtime = self._error_log['time']
+                    errmsg = self._error_log['error']
+                    self.logger.warning("Server able to recover and resume command={} after Error reported by client at {}: {}".format(self.id, errtime, errmsg))
+                if not start_logged:
+                    self.logger.info("Command {} STARTED..".format(self.id))
+                    start_logged = True
+                if pbar:
+                    try:
+                        pbar.update(self.file_position)
+                    except ValueError as e:
+                        if self.file_position == self.filesize + 1:
+                            self.logger.debug("One byte discrepancy ignored.")
+                            pbar.update(self.filesize)
+                        else:
+                            self.logger.warn("{} - file_postion:{} filesize:{}".format(e, self.file_position, self.filesize))
+                    except Exception as e:
+                        self.logger.error("Progress bar: {}".format(e))
+                time.sleep(1)
+                sleep_counter += 1
+            elif self.complete:
                 self.logger.info("Command {} COMPLETE.".format(self.id))
+                if pbar:
+                    pbar.finish()
                 return True
             else: # Only here if command in UNKNOWN or ERROR state
                 self.logger.info("Command {} state: {}.".format(self.id, self.status))
-                if self.status == 'ERROR':
+                if self.errored:
                     err = self.get_error_report()
                     self.logger.warning("Error message for command={} : {}".format(self.id, err['error']))
                 return None

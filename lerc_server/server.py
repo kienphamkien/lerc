@@ -152,6 +152,7 @@ def command_manager(host, remove_cid=None):
     # An error occured somewhere if a client fetched without a command moving out of the STARTED state
     started_command = Commands.query.filter(Commands.hostname==host).filter(Commands.status==cmdStatusTypes.STARTED).order_by(Commands.command_id.asc()).first()
     if started_command:
+        # XXX Maybe write code that attempts to recover the STARTED but not COMPLETE command
         logger.error("{} fetched without finishing CID={} - Changing command statue to UNKNOWN.".format(started_command.hostname, started_command.command_id))
         started_command.status = cmdStatusTypes.UNKNOWN
         db.session.commit()
@@ -172,7 +173,8 @@ def command_manager(host, remove_cid=None):
                 statinfo = os.stat(os.path.join(BASE_DIR,command.server_file_path))
                 if statinfo.st_size > (command.file_position - 1) and statinfo.st_size != 0:
                     command.file_position = statinfo.st_size + 1
-                    logger.warning("Updating database: More bytes found on server than recorded in database. Prior exception went unhandled or unnoticed. Probable connection drop and resume before server reached timeout")
+                    # Likly a connection drop and resume before server reached timeout
+                    logger.warning("CID={} : More bytes found on server than recorded in database. Updating database to recover.".format(command.command_id))
                     db.session.commit()
         elif command.operation == operationTypes.DOWNLOAD:
             if '\\' not in command.client_file_path:
@@ -221,6 +223,18 @@ def receive_streamed_data(command):
             stream_error = "Stream closed pre-maturely. ({})".format(str(e))
         f.close()
     return stream_error
+
+
+def update_file_position(command):
+    if command.server_file_path is not None:
+        try:
+            statinfo = os.stat(os.path.join(BASE_DIR,command.server_file_path))
+            if command.file_position != statinfo.st_size and command.file_position <= command.filesize:
+                command.file_position = statinfo.st_size + 1
+                logger.info("updating file_position for {} to {}".format(command.command_id, command.file_position))
+                db.session.commit()
+        except FileNotFoundError as e:
+            logger.warning("{} not found on server.".format(command.server_file_path))
 # End helper functions #
 
 
@@ -463,10 +477,18 @@ class Error(Resource):
                 logger.error("An Exception of type {} occured when receiving error from {}: {}".format(type(e).__name__,
                                                                                                        host, str(e)))
                 break
-        # logic to record command completion
+        logger.warn("Error message from host={} for command_id={} : '{}'".format(host, cid, error_message))
+
+        # update the command
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
         command.log_file_path = "{}{}_{}_ERROR.log".format(LOG_DIR, host, cid)
-        command.status = cmdStatusTypes.ERROR
+        # XXX So far, I've been unable to figure out why this happens with large transfers
+        if 'Unable to read data from the transport connection' in error_message or \
+           'Unable to write data to the transport connection' in error_message:
+            logger.info("Changing CID={} status from {} to PENDING so it correctly resumes.".format(cid, command.status))
+            command.status = cmdStatusTypes.PENDING
+        else:
+            command.status = cmdStatusTypes.ERROR
         # update last_activity
         client = Clients.query.filter_by(hostname=host).one()
         client.last_activity = datetime.now()
@@ -481,7 +503,6 @@ class Error(Resource):
                      'error': str(error_message)}
         with open(os.path.join(BASE_DIR, command.log_file_path), 'w') as f:
             json.dump(error_log, f)
-        logger.warn("Error message from host={} for command_id={} : '{}'".format(host, cid, error_message))
         return False
 # end client api resources
 
@@ -617,7 +638,23 @@ class Query(Resource):
                     query = query.filter(Commands.operation==op)
 
             commands = query.all()
-            results['commands'] = [command.to_dict() for command in commands]  
+
+            if len(commands) == 1:
+                # lerc_api.Command.refresh()
+                # update file_position to report on any transfer progress that's occured
+                update_file_position(commands[0])
+
+                command = commands[0].to_dict()
+                # include any existing error report
+                log_file_path = command['log_file_path']
+                if log_file_path:
+                    with open(os.path.join(BASE_DIR, log_file_path), 'r') as f:
+                        command['error'] = json.loads(f.read())
+                else: # No error log file
+                    command['error'] = None
+                results['commands'] = [command]
+            else:
+                results['commands'] = [command.to_dict() for command in commands]
 
         return results
 
@@ -763,6 +800,20 @@ class Command(Resource):
 
         return command.to_dict()
 
+class CancelCommand(Resource):
+    def post(self):
+        logger.info("Analyst attempting to cancel a command.")
+        command_id = request.args.get('id')
+        if not command_id:
+            return make_response("Missing arguments", 400)
+        command = Commands.query.filter(Commands.command_id==command_id).one()
+        if command:
+            command.status = cmdStatusTypes.CANCELED
+            db.session.commit()
+            return command.to_dict()
+        return {'status_code':'404',
+                'message': "Not Found",
+                'error': "Command id '{}' does not exist.".format(command_id)}
 
 class AnalystUpload(Resource):
     def post(self):
@@ -868,6 +919,8 @@ class AnalystDownload(Resource):
                 with open(os.path.join(BASE_DIR, command.log_file_path), 'r') as f:
                     error_report = json.loads(f.read())
                 return error_report
+            else: # No error log file
+                return {'error': None}
 
         if 'position' not in request.args:
             logger.warn("Malformed analyst download request")
@@ -903,6 +956,7 @@ api.add_resource(Error, '/error')
 # add analyst api resources
 api.add_resource(Query, '/query')
 api.add_resource(Command, '/command')
+api.add_resource(CancelCommand, '/command/cancel')
 api.add_resource(AnalystUpload, '/command/upload')
 api.add_resource(AnalystDownload, '/command/download')
 
