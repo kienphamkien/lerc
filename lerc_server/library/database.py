@@ -1,5 +1,6 @@
 
 import enum
+import pytz
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 
@@ -18,6 +19,7 @@ class cmdStatusTypes(enum.Enum):
     COMPLETE = 'COMPLETE'
     UNKNOWN = 'UNKNOWN'
     ERROR = 'ERROR'
+    CANCELED = 'CANCELED'
     PREPARING = 'PREPARING' # file transfer between analysis <-> crat server
 
 class clientStatusTypes(enum.Enum):
@@ -41,6 +43,7 @@ class Commands(db.Model):
     analyst_file_path = db.Column(db.String(1024))
     async_run = db.Column(db.Boolean, default=False)
     client_id = db.Column(db.Integer)
+    evaluated_time = db.Column(db.DateTime)
 
     def __init__(self, hostname, operation, client_id, client_file_path=None,
                  server_file_path=None, command=None, analyst_file_path=None, async_run=False):
@@ -59,6 +62,7 @@ class Commands(db.Model):
        self.file_position = 0
        self.filesize = None
        self.log_file_path = None
+       self.evaluated_time = None
 
     def to_dict(self):
         return {'command_id': self.command_id,
@@ -73,6 +77,7 @@ class Commands(db.Model):
                 'file_position': self.file_position,
                 'filesize': self.filesize,
                 'log_file_path': self.log_file_path,
+                'evaluated_time': self.evaluated_time.replace(tzinfo=pytz.utc).strftime('%Y-%m-%d %H:%M:%S%z') if self.evaluated_time else None,
                 'analyst_file_path': self.analyst_file_path}
 
 
@@ -98,9 +103,9 @@ class Clients(db.Model):
     def to_dict(self):
         return {'hostname': self.hostname,
                 'status': self.status.name,
-                'install_date': self.install_date.strftime('%Y-%m-%d %H:%M:%S'),
+                'install_date': self.install_date.replace(tzinfo=pytz.utc).strftime('%Y-%m-%d %H:%M:%S%z'),
                 'company_id': self.company_id,
-                'last_activity': self.last_activity.strftime('%Y-%m-%d %H:%M:%S'),
+                'last_activity': self.last_activity.replace(tzinfo=pytz.utc).strftime('%Y-%m-%d %H:%M:%S%z'),
                 'sleep_cycle': self.sleep_cycle,
                 'id': self.id,
                 'version': self.version}
