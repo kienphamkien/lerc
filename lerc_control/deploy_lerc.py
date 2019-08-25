@@ -68,7 +68,7 @@ def go_live(sensor):
     return lr_session
 
 
-def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
+def deploy_lerc(sensor, install_cmd, enviroment='default', lerc_installer_path=None):
 
     if not isinstance(sensor, models.Sensor):
         logger.error("Cb models.Sensor object required.")
@@ -78,8 +78,8 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
     default_lerc_path = '/opt/lerc_control/lercSetup.msi'
 
     if lerc_installer_path is None:
-        config = lerc_api.load_config('default', required_keys=['client_installer'])
-        lerc_installer_path = config['default']['client_installer']
+        config = lerc_api.load_config(enviroment, required_keys=['client_installer'])
+        lerc_installer_path = config[enviroment]['client_installer']
 
     # create lerc session
     ls = lerc_api.lerc_session()
@@ -263,7 +263,7 @@ def main(argv):
 
     sensor = CbSensor_search(args.company, args.hostname)
 
-    result = deploy_lerc(sensor, config[args.company]['lerc_install_cmd'], lerc_installer_path=args.package)
+    result = deploy_lerc(sensor, config[args.company]['lerc_install_cmd'], enviroment=args.company, lerc_installer_path=args.package)
     if result:
         print()
         print(result)
