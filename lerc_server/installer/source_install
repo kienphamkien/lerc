@@ -69,6 +69,7 @@ echo $pswd > .mysql.password.sed ;
 sed -i -e 's;^;s/LERC_DB_USER_PASSWORD/;' -e 's;$;/g;' .mysql.password.sed
 sed -f .mysql.password.sed installer/sql/user.sql > installer/sql/user.exec.sql
 rm .mysql.password.sed
+# TODO Make note of all installer/sql/updates/*.sql in an untracked applied_updates.txt file
 sudo mysql < installer/sql/user.exec.sql && rm installer/sql/user.exec.sql
 echo "LERC Server DB user created."
 echo "Database configuration complete."

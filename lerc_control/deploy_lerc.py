@@ -68,7 +68,7 @@ def go_live(sensor):
     return lr_session
 
 
-def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
+def deploy_lerc(sensor, install_cmd, enviroment='default', lerc_installer_path=None):
 
     if not isinstance(sensor, models.Sensor):
         logger.error("Cb models.Sensor object required.")
@@ -78,8 +78,8 @@ def deploy_lerc(sensor, install_cmd, lerc_installer_path=None):
     default_lerc_path = '/opt/lerc_control/lercSetup.msi'
 
     if lerc_installer_path is None:
-        config = lerc_api.load_config('default', required_keys=['client_installer'])
-        lerc_installer_path = config['default']['client_installer']
+        config = lerc_api.load_config(enviroment, required_keys=['client_installer'])
+        lerc_installer_path = config[enviroment]['client_installer']
 
     # create lerc session
     ls = lerc_api.lerc_session()
@@ -244,10 +244,9 @@ def CbSensor_search(profile, hostname):
 
 def main(argv):
 
-    parser = argparse.ArgumentParser(description="put file on CB sensor")
-    parser.add_argument('company', choices=auth.FileCredentialStore("response").get_profiles(),
-                        help='specify an environment you want to work with.')
-
+    parser = argparse.ArgumentParser(description="Use existing tools to install LERC")
+    cbR_profiles=auth.FileCredentialStore("response").get_profiles()
+    parser.add_argument('company', choices=cbR_profiles, help='specify an environment you want to work with.')
     parser.add_argument('hostname', help="the name of the host to deploy the client to")
     parser.add_argument('-p', '--package', help="the msi lerc package to install")
     args = parser.parse_args()
@@ -264,7 +263,7 @@ def main(argv):
 
     sensor = CbSensor_search(args.company, args.hostname)
 
-    result = deploy_lerc(sensor, config[args.company]['lerc_install_cmd'], lerc_installer_path=args.package)
+    result = deploy_lerc(sensor, config[args.company]['lerc_install_cmd'], enviroment=args.company, lerc_installer_path=args.package)
     if result:
         print()
         print(result)
