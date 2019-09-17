@@ -135,7 +135,11 @@ def parse_lerc_server_query(query_str):
 def _to_localtime(timestamp):
     """Convert server UTC timestamps to local time for user."""
     if timestamp:
-        return datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S%z').astimezone().strftime('%Y-%m-%d %H:%M:%S%z')
+        try:
+            return datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S%z').astimezone().strftime('%Y-%m-%d %H:%M:%S%z')
+        except ValueError:
+            # means server is not up-to-date OR this timestamp came a Client/Command issued before the server update
+            return timestamp
     return None
 
 class Client():

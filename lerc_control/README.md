@@ -1,6 +1,7 @@
 # Live Endpoint Response Client Control
 
-LERC Control provides utilities for interacting and controlling clients (via the LERC Server API) to perform live response and administrative actions. LERC Control can be used as a library or the 'lerc_ui' script is made available for global use when installed with pip3. 
+LERC Control provides utilities for interacting and controlling clients (via the LERC Server API) to perform live response and administrative actions. LERC Control can be used as a library or the 'lerc_ui' script is made available for global use when installed with pip3.
+
 ### Features
 
 + Upload files from clients
@@ -9,7 +10,10 @@ LERC Control provides utilities for interacting and controlling clients (via the
 + Run commands on the clients
 + Perform scripted routines
 + Create scripted routines and save them for future use
+    - Collection arguments auto-build from specified collection scripts
 + Perform complex collections routines via custom, extendable modules
+    - collect wmi data (startup, services, timezone, netuse, nic)
+    - collect autoruns, process handles, process listings, etc.
 + Perform remediation actions (file/registry deletions, service deletion, schedule task deletion, process killing) - also extendable module format
 + Query the LERC Server for client statuses and client command history
 
@@ -41,7 +45,6 @@ The following configuration items are required:
     lerc_install_cmd=<default client install command, something like 'msiexec /quiet /qn /l lerc_install.log /i lercSetup.msi company=0 reconnectdelay=15 chunksize=2048 serverurls="https://your-lerc-server/"'>
     production_lerc_version=<this should always reflect the current version string of the LERC you have in production, ex: 1.0.0.0>
 
-
 ### Default Config Items
 
 The following are default values that can be overriden:
@@ -67,7 +70,6 @@ The following are default values that can be overriden:
     [scripts]
     collect_browsing_history=scripts/collect_browsing_history.ini
     collect_wmi_data=scripts/collect_wmi_data.ini
-
 
 ## Documentation
 

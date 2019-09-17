@@ -271,8 +271,8 @@ def main():
                 ('Status', 'status', 11),
                 ('Version', 'version', 8),
                 ('Sleep Cycle', 'sleep_cycle', 11),
-                ('Install Date', 'install_date', 20),
-                ('Last Activity', 'last_activity', 20),
+                ('Install Date', 'install_date', 24),
+                ('Last Activity', 'last_activity', 24),
                 ('Company ID', 'company_id', 10)]
         print("\nClient Results:\n")
         print( TablePrinter(fmt, sep='  ', ul='=')(clients))
@@ -284,7 +284,8 @@ def main():
                     ('Client ID', 'client_id', 9),
                     ('Hostname', 'hostname', 20),
                     ('Operation', 'operation', 11),
-                    ('Status', 'status', 9)]
+                    ('Status', 'status', 9),
+                    ('Evaluated Time', 'evaluated_time', 24)]
                   #  ('Version', 'version', 8),
                   #  ('Sleep Cycle', 'sleep_cycle', 11),
                   #  ('Install Date', 'install_date', 20),
@@ -334,9 +335,34 @@ def main():
                 logger.debug("Found sensor in {} environment".format(env))
                 sensors.append((env, sensor))
         if len(sensors) > 1:
-            logger.error("A CarbonBlack Sensor was found by that hostname in multiple environments.")
-            sys.exit(1)
-        elif sensors:
+            logger.warning("A CarbonBlack Sensor was found by that hostname in multiple environments.")
+            analyst_options = {}
+            print("\nMultiple Sensors found:\n")
+            i = 0
+            for s in sensors:
+                i+=1
+                analyst_options[i] = s[0]
+                print("------------\n\tEnvironment: {}".format(s[0]))
+                print("\tID: {}".format(s[1].id))
+                print("\tStatus: {}".format(s[1].status))
+                print("\tHostname: {}".format(s[1].computer_name))
+                print("\tDNS Name: {}".format(s[1].computer_dns_name))
+                print("\tOS Type: {}".format(s[1].os_environment_display_string))
+                print()
+            print("\nWhich environment do you want to use?")
+            for num, env in analyst_options.items():
+                print("\t{}) {}".format(num, env))
+            choice = None
+            while choice is None:
+                i = int(input("Enter the number corresponding to the environment: "))
+                if i not in analyst_options.keys():
+                    print("Incorrect choice.")
+                else:
+                    choice = i
+            sensors = [s for s in sensors if s[0] == analyst_options[choice]]
+            print("proceeding with {}".format(sensors[0]))
+
+        if sensors:
             logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.INFO)
             sensor = sensors[0][1]
             config = lerc_api.check_config(config, required_keys=['lerc_install_cmd', 'client_installer'])
