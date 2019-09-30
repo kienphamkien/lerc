@@ -8,4 +8,4 @@ fi
 
 # delete files older than $1 days
 find /opt/lerc/lerc_server/data -type f -mtime +$1 -delete
-find /opt/lerc/lerc_server/logs/client_errors -type f -mtime +$1 -delete )
+find /opt/lerc/lerc_server/logs/client_errors -type f -mtime +$1 -delete
