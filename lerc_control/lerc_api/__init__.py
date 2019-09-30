@@ -822,16 +822,19 @@ class lerc_session():
             self.server = 'https://' + self.server
         if self.server[-1] == '/':
             self.server = self.server[:-1]
+        self.logger.debug("Attempting LERC Session with '{}'".format(self.server)) 
         if 'server_ca_cert' in self.config[profile]:
             self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
             os.environ['REQUESTS_CA_BUNDLE'] = self.config[profile]['server_ca_cert']
         self.client_cert = self.config[profile]['client_cert']
         self.client_key = self.config[profile]['client_key']
         self.cert = (self.client_cert, self.client_key)
+        self.logger.debug("using client certs: '{}'".format(self.cert))
         if 'ignore_system_proxy' in self.config[profile]:
             if self.config[profile].getboolean('ignore_system_proxy'):
                 # route direct
                 if 'https_proxy' in os.environ:
+                    self.logger.debug("Ignoring system proxy settings.")
                     del os.environ['https_proxy']
         self.chunk_size = chunk_size
 
