@@ -1,0 +1,1 @@
+ALTER TABLE commands ADD evaluated_time DATETIME DEFAULT NULL;

@@ -68,7 +68,7 @@ def go_live(sensor):
     return lr_session
 
 
-def deploy_lerc(sensor, install_cmd, enviroment='default', lerc_installer_path=None):
+def deploy_lerc(sensor, install_cmd, environment='default', lerc_installer_path=None):
 
     if not isinstance(sensor, models.Sensor):
         logger.error("Cb models.Sensor object required.")
@@ -78,8 +78,12 @@ def deploy_lerc(sensor, install_cmd, enviroment='default', lerc_installer_path=N
     default_lerc_path = '/opt/lerc_control/lercSetup.msi'
 
     if lerc_installer_path is None:
-        config = lerc_api.load_config(enviroment, required_keys=['client_installer'])
-        lerc_installer_path = config[enviroment]['client_installer']
+        config = lerc_api.load_config(environment, required_keys=['client_installer'])
+        if config.has_option(environment, 'client_installer'):
+            lerc_installer_path = config[environment]['client_installer']
+        else:
+            lerc_installer_path = config['default']['client_installer']
+        
 
     # create lerc session
     ls = lerc_api.lerc_session()
@@ -190,57 +194,49 @@ def deploy_lerc(sensor, install_cmd, enviroment='default', lerc_installer_path=N
 def CbSensor_search(profile, hostname):
     cb = CbResponseAPI(profile=profile)
     sensor = None
+    logger.info("Getting the sensor object from carbonblack")
     try:
-        logger.debug("Getting the sensor object from carbonblack")
-        return cb.select(Sensor).where("hostname:{}".format(hostname)).one()
-    except TypeError as e:
-        # Appears to be bug in cbapi library here -> site-packages/cbapi/query.py", line 34, in one
-        # Raise MoreThanOneResultError(message="0 results for query {0:s}".format(self._query))
-        # That raises a TypeError 
-        if 'non-empty format string passed to object' in str(e):
-            try: # accounting for what appears to be an error in cbapi error handling
-                result = cb.select(Sensor).where("hostname:{}".format(hostname))
-                if isinstance(result[0], models.Sensor):
-                    print()
-                    logger.warn("MoreThanOneResult Error searching for {0:s}".format(hostname))
-                    print("\nResult breakdown:")
-                    sensor_ids = []
-                    for s in result:
-                        sensor_ids.append(int(s.id))
-                        if int(s.id) == max(sensor_ids):
-                            sensor = s
-                        print()
-                        print("Sensor object - {}".format(s.webui_link))
-                        print("-------------------------------------------------------------------------------\n")
-                        print("\tos_environment_display_string: {}".format(s.os_environment_display_string))
-                        print()
-                        print("\tstatus: {}".format(s.status))
-                        print("\tsensor_id: {}".format(s.id))
-                        print("\tlast_checkin_time: {}".format(s.last_checkin_time))
-                        print("\tnext_checkin_time: {}".format(s.next_checkin_time))
-                        print("\tsensor_health_message: {}".format(s.sensor_health_message))
-                        print("\tsensor_health_status: {}".format(s.sensor_health_status))
-                        print("\tnetwork_interfaces:")
-                    print()
-                    default_sid = max(sensor_ids)
-                    choice_string = "Which sensor do you want to use?\n"
-                    for sid in sensor_ids:
-                        choice_string += "\t- {}\n".format(sid)
-                    choice_string += "\nEnter one of the sensor ids above. Default: [{}]".format(default_sid)
-                    user_choice = int(input(choice_string) or default_sid)
-                    for s in result:
-                        if user_choice == int(s.id):
-                            return s
-            except Exception as e:
-                if sensor is None:
-                    logger.warning("A sensor by hostname '{}' wasn't found in this environment".format(hostname))
-                    return False
-                logger.error("{}".format(str(e)))
-                return False
+        result = cb.select(Sensor).where("hostname:{}".format(hostname))
+        if len(result) == 1:
+            return result.one()
+        if isinstance(result[0], models.Sensor):
+            print()
+            logger.warn("MoreThanOneResult searching for {0:s}".format(hostname))
+            print("\nResult breakdown:")
+            sensor_ids = []
+            for s in result:
+                sensor_ids.append(int(s.id))
+                if int(s.id) == max(sensor_ids):
+                    sensor = s
+                print()
+                print("Sensor object - {}".format(s.webui_link))
+                print("-------------------------------------------------------------------------------\n")
+                print("\tos_environment_display_string: {}".format(s.os_environment_display_string))
+                print()
+                print("\tstatus: {}".format(s.status))
+                print("\tsensor_id: {}".format(s.id))
+                print("\tlast_checkin_time: {}".format(s.last_checkin_time))
+                print("\tnext_checkin_time: {}".format(s.next_checkin_time))
+                print("\tsensor_health_message: {}".format(s.sensor_health_message))
+                print("\tsensor_health_status: {}".format(s.sensor_health_status))
+                print("\tnetwork_interfaces:")
+            print()
+            default_sid = max(sensor_ids)
+            choice_string = "Which sensor do you want to use?\n"
+            for sid in sensor_ids:
+                choice_string += "\t- {}\n".format(sid)
+            choice_string += "\nEnter one of the sensor ids above. Default: [{}]".format(default_sid)
+            user_choice = int(input(choice_string) or default_sid)
+            for s in result:
+                if user_choice == int(s.id):
+                    logger.info("Returning {} sensor".format(s))
+                    return s
     except Exception as e:
+        if sensor is None:
+            logger.warning("A sensor by hostname '{}' wasn't found in this environment".format(hostname))
+            #return False
         logger.error("{}".format(str(e)))
         return False
-
 
 def main(argv):
 
@@ -263,7 +259,7 @@ def main(argv):
 
     sensor = CbSensor_search(args.company, args.hostname)
 
-    result = deploy_lerc(sensor, config[args.company]['lerc_install_cmd'], enviroment=args.company, lerc_installer_path=args.package)
+    result = deploy_lerc(sensor, config[args.company]['lerc_install_cmd'], environment=args.company, lerc_installer_path=args.package)
     if result:
         print()
         print(result)

@@ -594,7 +594,7 @@ def main():
         elif args.write_only:
             cmd.get_results(print_run=False, file_path=args.output_filename)
         else:
-            cmd.get_results()
+            cmd.get_results(file_path=args.output_filename)
     else:
         cmd.get_results()
 
