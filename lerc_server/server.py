@@ -17,12 +17,13 @@ from werkzeug.serving import WSGIRequestHandler
 import library.clientInstructions as ci
 from library.database import db, operationTypes, cmdStatusTypes, clientStatusTypes, Commands, Clients, CompanyMapping
 
-
+# TODO these should go in config files - also, convert to yaml config
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 DATA_DIR = 'data/'
 LOG_DIR = 'logs/'
 ETC_DIR = 'etc/'
-DIRECTORIES = [DATA_DIR, LOG_DIR, ETC_DIR]
+CLIENT_ERROR_DIR = LOG_DIR + 'client_errors/'
+DIRECTORIES = [DATA_DIR, LOG_DIR, ETC_DIR, CLIENT_ERROR_DIR]
 # make sure all the directories exists that need to exist
 for path in [os.path.join(BASE_DIR, x) for x in DIRECTORIES]:
     if not os.path.isdir(path):
@@ -492,7 +493,7 @@ class Error(Resource):
 
         # update the command
         command = Commands.query.filter_by(hostname=host, command_id=cid).one()
-        command.log_file_path = "{}{}_{}_ERROR.log".format(LOG_DIR, host, cid)
+        command.log_file_path = "{}{}_{}_ERROR.log".format(CLIENT_ERROR_DIR, host, cid)
         # XXX So far, I've been unable to figure out why this happens with large transfers
         if 'Unable to read data from the transport connection' in error_message or \
            'Unable to write data to the transport connection' in error_message:

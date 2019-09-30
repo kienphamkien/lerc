@@ -104,7 +104,10 @@ venv.bak/
 .mypy_cache/
 
 certs/
-bin/
+#bin/
+ssl/
+data/
+logs/
 obj/
 Debug/
 Release/
