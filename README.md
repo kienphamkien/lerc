@@ -1,3 +1,5 @@
+# THIS REPOSITORY HAS MOVED TO https://github.com/ace-ecosystem/lerc
+
 # Live Endpoint Response Client
 
 The Live Endpoint Response Client (LERC) acts as a remote access solution but was originally developed to solve the problem of transferring large files over garbage internet connections and constant endpoint up/down scenarios. LERC is capable to resuming file transfers from client to server and server to client.
