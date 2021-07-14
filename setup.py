@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""A setuptools based setup module.
-See:
-https://packaging.python.org/en/latest/distributing.html
-https://github.com/pypa/sampleproject
-"""
-
 
 # Always prefer setuptools over distutils
 from setuptools import setup, find_packages
@@ -14,7 +8,7 @@ from setuptools import setup, find_packages
 from codecs import open
 from os import path
 
-__version__ = "0.0.23"
+__version__ = "0.0.24"
 description = "Libraries and utilities for controling and working with Live Endpoint Response Clients."
 
 here = path.abspath(path.dirname(__file__))
@@ -36,11 +30,11 @@ setup(
     long_description_content_type='text/markdown',
 
     # The project's main homepage.
-    url='https://github.com/IntegralDefense/lerc/lerc_control',
+    url='https://github.com/ace-ecosystem/lerc/lerc_control',
 
     # Author details
     author='Sean McFeely',
-    author_email='zsmcfeely@gmail.com',
+    author_email='mcfeelynaes@gmail.com',
 
     # Choose your license
     license='Apache-2.0',
@@ -93,9 +87,10 @@ setup(
     # your project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    install_requires=['coloredlogs', 'python-dateutil', 'requests', 'rotl>=0.0.5', 'tqdm'],
+    install_requires=['coloredlogs', 'python-dateutil', 'requests', 'rotl>=0.0.5', 'tqdm', 'argcomplete', 'progressbar'],
 
-    entry_points={
-        'console_scripts': ['lerc_ui=lerc_control:main'],
-    }
+    scripts=['lerc_control/bin/lerc_ui', 'lerc_control/bin/deploy_lerc'],
+    #entry_points={
+    #    'console_scripts': ['lerc_ui=lerc_control:main','deploy_lerc=lerc_control.deploy_lerc:main'],
+    #}
 )
