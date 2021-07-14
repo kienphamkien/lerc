@@ -180,7 +180,7 @@ def multi_collect(client, collect_file):
 
 def full_collection(lerc):
     #########################################################################################
-    ### This is an Integral Defense custom module built for a private collection package. ###
+    ### This is a custom module built for a private collection package.                   ###
     ### :param lerc_api.Client lerc: A lerc Client object                                 ###
     #########################################################################################
     if not isinstance(lerc, lerc_api.Client):
@@ -220,24 +220,28 @@ def full_collection(lerc):
     collect_command = lerc.Run(collect_cmd)
     logger.info("Issued CID={} to run {}.".format(collect_command.id, collect_cmd))
     # finish contriving the output filename
-    output_filename = None
+    output_filename = upload_command = None
     local_date_str_cmd.refresh()
     while True:
         if local_date_str_cmd.status == 'COMPLETE':
             dateStr = local_date_str_cmd.get_results(return_content=True).decode('utf-8')
             logger.debug("Got date string of '{}'".format(dateStr))
-            # Mon 11/19/2018 -> 20181119      
-            dateStr = dateStr.split(' ')[1].split('/')
-            dateStr =  dateStr[2]+dateStr[0]+dateStr[1]
-            # hostname.upper() because streamline.py expects uppercase
-            output_filename = lerc.hostname.upper() + "." + dateStr + ".7z"
+            try:
+                # Mon 11/19/2018 -> 20181119 
+                dateStr = dateStr.split(' ')[1].split('/')
+                dateStr =  dateStr[2]+dateStr[0]+dateStr[1]
+                 # hostname.upper() because streamline.py expects uppercase
+                output_filename = lerc.hostname.upper() + "." + dateStr + ".7z"
+            except IndexError:
+                logger.warning("Unexpected date string obtained. Got '{}'".format(dateStr))
             break
         # wait five seconds before asking the server again
         time.sleep(5)
-        local_date_str_cmd.refresh() 
-    # collect the output file
-    upload_command = lerc.Upload(client_workdir + output_dir + output_filename)
-    logger.info("Issued CID={} to upload output at: '{}'".format(upload_command.id, client_workdir + output_dir + output_filename))
+        local_date_str_cmd.refresh()
+    # if output_filename is still None then an IndexError occured above, go a little more brute.
+    if output_filename is not None:
+        upload_command = lerc.Upload(client_workdir + output_dir + output_filename)
+        logger.info("Issued CID={} to upload output at: '{}'".format(upload_command.id, client_workdir + output_dir + output_filename))
     # Stream back collect.bat output as it comes in
     logger.info("Streaming collect.bat output ... ")
     position = 0
@@ -256,15 +260,30 @@ def full_collection(lerc):
                 if len(results) > 0:
                     position += len(results)
                     print(results.decode('utf-8'))
-            elif position >= collect_command.filesize:
-                break
+            break
         elif collect_command.status == 'UNKNOWN' or collect_command.status == 'ERROR':
             logger.error("Collect command went to {} state : {}".format(collect_command.status, collect_command))
             return False
         time.sleep(5)
+    if upload_command is None:
+        output_dir_dict = lerc.list_directory(client_workdir + output_dir)
+        dir_dict = output_dir_dict['dir_dict']
+        # there should only be one file left in the dir
+        dfiles = [item['name'] for item in dir_dict if item['type'] == 'file']
+        if len(dfiles) > 1:
+            logger.warning("More than one file found in output directory: {}".format(dfiles))
+            logger.info("Issuing commands to collect all files.. ")
+            for df in dfiles:
+                upload_command = lerc.Upload(client_workdir + output_dir + df)
+                logger.info("Issued CID={} to upload output at: '{}'".format(upload_command.id, client_workdir + output_dir + df))
+                output_filename = df
+        else:
+            upload_command = lerc.Upload(client_workdir + output_dir + dfiles[0])
+            logger.info("Issued CID={} to upload output at: '{}'".format(upload_command.id, client_workdir + output_dir + dfiles[0]))
+            output_filename = dfiles[0]
     logger.info("Waiting for '{}' upload to complete.".format(output_filename))
     upload_command.wait_for_completion()
-    #commands.append(upload_command)
+    
     if upload_command.status == 'COMPLETE':
         logger.info("Upload command complete. Telling lerc to delete the output file on the client")
         commands.append(lerc.Run('DEL /S /F /Q "{}"'.format(client_workdir + output_dir + output_filename)))

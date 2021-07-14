@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 
 import os
 import sys
-import time
+import argcomplete
 import argparse
 import logging
 import coloredlogs
@@ -88,6 +89,7 @@ def main():
     parser.add_argument('-r', '--resume', action='store', help="resume a pending command id") 
     parser.add_argument('-g', '--get', action='store', help="get results for a command id")
     parser.add_argument('-k', '--cancel', action='store', help="Tell the server to CANCEL this command.")
+    parser.add_argument('--do-not-wait', action='store_true', help="Do not wait for issued commands to complete.")
 
     subparsers = parser.add_subparsers(dest='instruction') #title='subcommands', help='additional help')
 
@@ -194,6 +196,8 @@ def main():
     parser_remediate.add_argument('-ds', '--delete-service', help='Delete a service from the registry and the ServicePath from the file system.')
     parser_remediate.add_argument('-dst', '--delete-scheduled-task', help='Delete a scheduled task by name')
 
+    # for command completions in bash
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
     if args.debug:
@@ -320,53 +324,41 @@ def main():
             sys.exit(0)
         logger.info("Attempting to deploy lerc with CarbonBlack..")
         try:
-            from cbapi import auth
+            from cbapi.response import CbResponseAPI
+            from cbapi.psc.threathunter import CbThreatHunterAPI
+            from cbinterface.cli import load_configured_environments
+            from cbinterface.psc.device import find_device_by_hostname
             from lerc_control.deploy_lerc import deploy_lerc, CbSensor_search
         except:
-            logger.error("Failed to import deployment functions from lerc_control.deploy_lerc OR cbapi.")
+            logger.error("Failed to import deployment functions. Install and configure cbinterface, if you have Carbon Black.")
             sys.exit(1)
         logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.ERROR)
-        environments = auth.FileCredentialStore("response").get_profiles()
-        sensors = []
-        logger.debug("Trying to find the sensor in the available carbonblack environments.")
-        for env in environments:         
-            sensor = CbSensor_search(env, args.hostname)
-            if sensor:
-                logger.debug("Found sensor in {} environment".format(env))
-                sensors.append((env, sensor))
-        if len(sensors) > 1:
-            logger.warning("A CarbonBlack Sensor was found by that hostname in multiple environments.")
-            analyst_options = {}
-            print("\nMultiple Sensors found:\n")
-            i = 0
-            for s in sensors:
-                i+=1
-                analyst_options[i] = s[0]
-                print("------------\n\tEnvironment: {}".format(s[0]))
-                print("\tID: {}".format(s[1].id))
-                print("\tStatus: {}".format(s[1].status))
-                print("\tHostname: {}".format(s[1].computer_name))
-                print("\tDNS Name: {}".format(s[1].computer_dns_name))
-                print("\tOS Type: {}".format(s[1].os_environment_display_string))
-                print()
-            print("\nWhich environment do you want to use?")
-            for num, env in analyst_options.items():
-                print("\t{}) {}".format(num, env))
-            choice = None
-            while choice is None:
-                i = int(input("Enter the number corresponding to the environment: "))
-                if i not in analyst_options.keys():
-                    print("Incorrect choice.")
-                else:
-                    choice = i
-            sensors = [s for s in sensors if s[0] == analyst_options[choice]]
-            print("proceeding with {}".format(sensors[0]))
 
-        if sensors:
+        device_or_sensor = None
+        configured_environments = load_configured_environments()
+        if "psc" in configured_environments or "cbc" in configured_environments:
+            # search here first
+            logger.info(f"searching for device...")
+            profiles = configured_environments.get("psc", [])
+            profiles.extend(configured_environments.get("cbc", []))
+            for profile in profiles:
+                cb = CbThreatHunterAPI(profile=profile)
+                device_or_sensor = find_device_by_hostname(cb, args.hostname)
+                if device_or_sensor:
+                    break
+
+        if not device_or_sensor:
+            if "response" in configured_environments:
+                logger.debug("Trying to find a carbonblack response sensor ...")
+                for profile in configured_environments["response"]:
+                    device_or_sensor = CbSensor_search(profile, args.hostname)
+                    if device_or_sensor:
+                        break
+
+        if device_or_sensor:
             logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.INFO)
-            sensor = sensors[0][1]
             config = lerc_api.check_config(config, required_keys=['lerc_install_cmd', 'client_installer'])
-            result = deploy_lerc(sensor, config[sensors[0][0]]['lerc_install_cmd'], lerc_installer_path=config['default']['client_installer'])
+            result = deploy_lerc(device_or_sensor, config[args.environment]['lerc_install_cmd'], lerc_installer_path=config[args.environment]['client_installer'], interactive=True)
             if result: # modify deploy_lerc to use new client objects
                 logger.info("Successfully deployed lerc to this host: {}".format(args.hostname))
                 client = ls.get_host(args.hostname)
@@ -579,7 +571,7 @@ def main():
         print(client)
         sys.exit()
 
-    if not cmd:
+    if not cmd or args.do_not_wait:
         sys.exit(1)
 
     if not cmd.wait_for_completion():
@@ -594,7 +586,7 @@ def main():
         elif args.write_only:
             cmd.get_results(print_run=False, file_path=args.output_filename)
         else:
-            cmd.get_results()
+            cmd.get_results(file_path=args.output_filename)
     else:
         cmd.get_results()
 

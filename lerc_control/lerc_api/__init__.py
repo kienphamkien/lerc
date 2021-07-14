@@ -1,9 +1,9 @@
 
 import os
-import sys
 import time
 import json
 import logging
+from typing import Dict
 import requests
 from hashlib import md5
 from datetime import datetime
@@ -151,7 +151,7 @@ class Client():
     contained = False
     logger = logging.getLogger(__name__+".Client")
 
-    def __init__(self, host_dict, profile='default'):
+    def __init__(self, host_dict, profile='default', **requests_kwargs):
         self.hostname = host_dict['hostname']
         self.version = host_dict['version']
         self.company_id = host_dict['company_id']
@@ -163,7 +163,7 @@ class Client():
         self.install_date = _to_localtime(host_dict['install_date'])
         self._raw = host_dict
         self.profile = profile
-        self._lerc_session = lerc_session(profile=profile)
+        self._lerc_session = lerc_session(profile=profile, **requests_kwargs)
 
     @property
     def get_dict(self):
@@ -172,7 +172,7 @@ class Client():
 
     def refresh(self):
         """Query the LERC Server to get an update on this LERC."""
-        r = requests.get(self._ls.server+'/query', params={'client_id': self.id}, cert=self._ls.cert).json()
+        r = self._ls.http_get_object('query', params={'client_id': self.id})
         if 'error' in r:
             self.logger.error("{}".format(r['error']))
             return False
@@ -230,23 +230,15 @@ class Client():
     def _issue_command(self, command):
         # check the host, make the post
         arguments = {'host': self.hostname, 'id': self.id}
-        headers={"content-type": "application/json"}
-        r = requests.post(self._ls.server+'/command', cert=self._ls.cert, headers=headers,
-                                                params=arguments, data=json.dumps(command))
-        if r.status_code != requests.codes.ok:
-            self.error = { 'status_code': r.status_code, 'message': "ERROR : {}".format(r.text) }
-            self.logger.critical("Got status code '{}' : {}".format(r.status_code, r.json()['message']))
-            raise Exception("Something went wrong with the server. Got '{}' response.".format(r.status_code)) from None
-        else: # record the command
-            result = r.json()
-            if 'command' in result:
-                self.logger.info("{} (CID: {})".format(result['message'], result['command']['command_id']))
-                return Command(result['command'], profile=self.profile)
-            else:
-                if 'error' not in result:
-                    raise Exception("Unexpected result: {}".format(result))
-                self.logger.error("{}".format(results['error']))
-                return False
+        result = self._ls.http_post_object('command', params=arguments, data=command)
+        if 'command' in result:
+            self.logger.info("{} (CID: {})".format(result['message'], result['command']['command_id']))
+            return Command(result['command'], profile=self.profile)
+        else:
+            if 'error' not in result:
+                raise Exception("Unexpected result: {}".format(result))
+            self.logger.error("{}".format(results['error']))
+            return False
 
 
     def Run(self, shell_command, async=False):
@@ -414,7 +406,7 @@ class Command():
 
     logger = logging.getLogger(__name__+".Command")
 
-    def __init__(self, cmd_dict, profile='default'):
+    def __init__(self, cmd_dict, profile='default', **requests_kwargs):
         self.id = cmd_dict['command_id']
         self.hostname = cmd_dict['hostname']
         self.client_id = cmd_dict['client_id']
@@ -428,7 +420,7 @@ class Command():
         self.file_position = cmd_dict['file_position']
         self.filesize = cmd_dict['filesize']
         self.evaluated_time = _to_localtime(cmd_dict['evaluated_time'])
-        self._lerc_session = lerc_session(profile=profile)
+        self._lerc_session = lerc_session(profile=profile, **requests_kwargs)
         self._raw = cmd_dict
         self._error_log = None
 
@@ -511,7 +503,7 @@ class Command():
             self.logger.info("Command has already been evaluated and left in '{}' state.".format(self.status))
             return False
         self.logger.info("Attempting to cancel command {} ; currently in '{}' state.".format(self.id, self.status))
-        r = requests.post(self._ls.server+'/command/cancel', cert=self._ls.cert, params={'id': self.id}).json()
+        r = self._ls.http_post_object('command/cancel', params={'id': self.id})
         if 'error' in r:
             self.logger.warning(r['error'])
         self.status = r['status']
@@ -520,7 +512,7 @@ class Command():
     def refresh(self, cmd_dict=None):
         """Query the lerc server and update this command with the latest data."""
         if not cmd_dict:
-            r = requests.get(self._ls.server+'/query', cert=self._ls.cert, params={'cmd_id': self.id, 'rc': True}).json()
+            r = self._ls.http_get_object('query', params={'cmd_id': self.id, 'rc': True})
             if 'commands' in r and len(r['commands']) == 1:
                 cmd_dict = r['commands'][0]
             else:
@@ -561,7 +553,7 @@ class Command():
                     yield data
                     data = f.read(4096)
         try:
-            r = requests.post(self._ls.server+'/command/upload', cert=self._ls.cert, params=arguments, data=gen())
+            r = self._ls.http_send_data_stream('command/upload', params=arguments, data=gen())
         except requests.exceptions.ConnectionError as e:
             self.logger.error("Connection Error when uploading to server (using a proxy? - https://github.com/IntegralDefense/lerc/issues/33): {}".format(e))
             return False
@@ -581,7 +573,7 @@ class Command():
         """If an error report exists for this command, get it.
         """
         arguments = {'cid': self.id, 'error': True}
-        r = requests.get(self._ls.server+'/command/download', cert=self._ls.cert, params=arguments).json()
+        r = self._ls.http_get_object('command/download', params=arguments)
         return r
 
     def get_results(self, file_path=None, chunk_size=None, print_run=True, return_content=False, position=0, display_transfer_progress=True):
@@ -607,7 +599,7 @@ class Command():
             return None
 
         # Proceed only if the server reports it has results
-        r = requests.get(self._ls.server+'/command/download', cert=self._ls.cert, params={'result': self.server_file_path}).json()
+        r = self._ls.http_get_object('command/download', params={'result': self.server_file_path})
         if 'error' in r:
             self.logger.warning("{}".format(r['error']))
             return False
@@ -646,11 +638,11 @@ class Command():
 
         if self.status != 'COMPLETE' and self.status != 'STARTED':
             self.logger.warning("Any results for commands in state={} can not be reliably streamed.".format(self.status))
-            return requests.get(self._ls.server+'/command/download', cert=self._ls.cert, params=arguments).json()
+            return self._ls.http_get_object('/command/download', params=arguments)
 
         raw_bytes = None
         total_chunks, remaining_bytes = divmod(self.filesize - position, self._ls.chunk_size)
-        with closing(requests.get(self._ls.server+'/command/download', cert=self._ls.cert, params=arguments, headers=headers, stream=True)) as r:
+        with closing(self._ls.http_get_data_stream('command/download', params=arguments, headers=headers)) as r:
             try:
                 r.raw.decode_content = True
                 # are we returning the raw bytes?
@@ -811,7 +803,7 @@ class lerc_session():
     server = None
     logger = logging.getLogger(__name__+".lerc_session")
 
-    def __init__(self, profile='default', server=None, chunk_size=4096):
+    def __init__(self, profile='default', server=None, chunk_size=4096, **requests_kwargs):
         self.config = check_config(CONFIG, required_keys=['server', 'server_ca_cert', 'client_cert', 'client_key'])
         self.profile = profile
         if server:
@@ -822,18 +814,34 @@ class lerc_session():
             self.server = 'https://' + self.server
         if self.server[-1] == '/':
             self.server = self.server[:-1]
+        self.logger.debug("Attempting LERC Session with '{}'".format(self.server))
+        self.chunk_size = chunk_size
+
+        # set up the requests session
+        self.session = requests.Session()
+        # user-supplied dict of kwargs supplied to requests calls
+        self.requests_kwargs = requests_kwargs
+        # manual verification cert
         if 'server_ca_cert' in self.config[profile]:
             self.logger.debug("setting 'REQUESTS_CA_BUNDLE' environment variable for HTTPS verification")
-            os.environ['REQUESTS_CA_BUNDLE'] = self.config[profile]['server_ca_cert']
+            self.session.verify = self.config[profile]['server_ca_cert']
+        # client authentication cert
         self.client_cert = self.config[profile]['client_cert']
         self.client_key = self.config[profile]['client_key']
         self.cert = (self.client_cert, self.client_key)
+        self.session.cert = self.cert
+        self.logger.debug("using client certs: '{}'".format(self.cert))
+        # session proxy settings
         if 'ignore_system_proxy' in self.config[profile]:
+            # TODO: also supply the opposite option, proxy settings.
             if self.config[profile].getboolean('ignore_system_proxy'):
-                # route direct
-                if 'https_proxy' in os.environ:
-                    del os.environ['https_proxy']
-        self.chunk_size = chunk_size
+                self.session.proxies = {
+                    'http': '',
+                    'https': '',
+                    'no': 'pass'
+                }
+        if 'proxy' in self.config[profile]:
+            self.session.proxies['https'] = self.config[profile]['proxy']
 
     @property
     def get_config(self):
@@ -842,6 +850,43 @@ class lerc_session():
     @property
     def get_profile(self):
         return self.profile
+
+    def http_get_object(self, api_route, params={}):
+        """Get a JSON object from the server."""
+        if api_route.startswith("/"):
+            # shouldn't need to do this but it's clean
+            api_route = api_route[1:]
+        url = f"{self.server}/{api_route}"
+        return self.session.get(url, params=params, **self.requests_kwargs).json()
+
+    def http_post_object(self, api_route, params={}, data={}):
+        """Post an object to the server."""
+        headers={"content-type": "application/json"}
+        if api_route.startswith("/"):
+            api_route = api_route[1:]
+        url = f"{self.server}/{api_route}"
+        r = self.session.post(url, params=params, headers=headers, data=json.dumps(data), **self.requests_kwargs)
+        if r.status_code != requests.codes.ok:
+            # NOTE: server errors handles here. Logic errors from the server return json with an error message.
+            self.error = { 'status_code': r.status_code, 'message': "ERROR : {}".format(r.text) }
+            self.logger.critical("Got status code '{}' : {}".format(r.status_code, r.json()['message']))
+            raise Exception("Something went wrong with the server. Got '{}' response.".format(r.status_code)) from None
+        return r.json()
+
+    def http_get_data_stream(self, api_route, params={}, headers={}):
+        """HTTP GET data stream request."""
+        if api_route.startswith("/"):
+            api_route = api_route[1:]
+        url = f"{self.server}/{api_route}"
+        return self.session.get(url, params=params, headers=headers, stream=True, **self.requests_kwargs)
+
+    def http_send_data_stream(self, api_route, params: Dict, data: bytearray):
+        """HTTP POST data stream to server"""
+        if api_route.startswith("/"):
+            api_route = api_route[1:]
+        url = f"{self.server}/{api_route}"
+        return self.session.post(url, params=params, data=data, **self.requests_kwargs)
+
 
     def query(self, **kwargs):
         """Query the lerc server database. Very simple queries supported.
@@ -875,7 +920,7 @@ class lerc_session():
                 kwargs['rc'] = True
 
         self.logger.debug("Searching for client(s) meeting : {}".format(kwargs))
-        r = requests.get(self.server+'/query', cert=self.cert, params=kwargs).json()
+        r = self.http_get_object('query', params=kwargs)
         results = {}
         if 'clients' in r:
             results['clients'] = [Client(c, profile=self.profile) for c in r['clients']]

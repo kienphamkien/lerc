@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+if [ -z "$1" ]
+then
+    echo "usage: cleanup <integer: delete data and log files older than integer days>"
+    exit 1
+fi
+
+# delete files older than $1 days
+find /opt/lerc/lerc_server/data -type f -mtime +$1 -delete
+find /opt/lerc/lerc_server/logs/client_errors -type f -mtime +$1 -delete
