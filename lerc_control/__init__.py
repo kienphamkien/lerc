@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 
 import os
 import sys
 import time
+import argcomplete
 import argparse
 import logging
 import coloredlogs
@@ -88,6 +90,7 @@ def main():
     parser.add_argument('-r', '--resume', action='store', help="resume a pending command id") 
     parser.add_argument('-g', '--get', action='store', help="get results for a command id")
     parser.add_argument('-k', '--cancel', action='store', help="Tell the server to CANCEL this command.")
+    parser.add_argument('--do-not-wait', action='store_true', help="Do not wait for issued commands to complete.")
 
     subparsers = parser.add_subparsers(dest='instruction') #title='subcommands', help='additional help')
 
@@ -194,6 +197,8 @@ def main():
     parser_remediate.add_argument('-ds', '--delete-service', help='Delete a service from the registry and the ServicePath from the file system.')
     parser_remediate.add_argument('-dst', '--delete-scheduled-task', help='Delete a scheduled task by name')
 
+    # for command completions in bash
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
     if args.debug:
@@ -579,7 +584,7 @@ def main():
         print(client)
         sys.exit()
 
-    if not cmd:
+    if not cmd or args.do_not_wait:
         sys.exit(1)
 
     if not cmd.wait_for_completion():
