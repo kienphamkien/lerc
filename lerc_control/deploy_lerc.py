@@ -16,17 +16,17 @@ from lerc_control import lerc_api
 logger = logging.getLogger("lerc_control."+__name__)
 
 try:
-    from cbapi.psc import Device
-    from cbapi.psc.threathunter import CbThreatHunterAPI
+    from cbc_sdk.platform.devices import Device
+    from cbc_sdk import CBCloudAPI
     from cbapi.response import CbResponseAPI, Sensor
-    from cbapi.errors import ConnectionError, UnauthorizedError, ServerError, ClientError
+    from cbc_sdk.errors import ConnectionError, UnauthorizedError, ServerError, ClientError
 
     from cbinterface.cli import load_configured_environments
-    from cbinterface.config import get_default_cbapi_product, get_default_cbapi_profile
+    from cbinterface.config import get_default_cb_product, get_default_cb_profile
     from cbinterface.helpers import input_with_timeout
     from cbinterface.commands import ExecuteCommand, PutFile, GetFile, DeleteFile
 
-    from cbinterface.psc.device import find_device_by_hostname, is_device_online
+    from cbinterface.enterprise_edr.device import find_device_by_hostname, is_device_online
     from cbinterface.response.sensor import make_sensor_query, is_sensor_online
 except ModuleNotFoundError:
     sys.stderr.write("[ERROR] deploy_lerc only supports deployment with carbon black and cbinterface.")
@@ -105,7 +105,7 @@ def deploy_lerc(device_or_sensor: Union[Device, Sensor], install_command: str, l
 
     hostname = device = sensor = None
     if isinstance(device_or_sensor, Device):
-        from cbinterface.psc.sessions import CustomLiveResponseSessionManager
+        from cbinterface.enterprise_edr.sessions import CustomLiveResponseSessionManager
         device = device_or_sensor
         hostname = device.name[device.name.rfind('\\')+1:] if '\\' in device.name else device.name
     elif isinstance(device_or_sensor, Sensor):
@@ -138,7 +138,7 @@ def deploy_lerc(device_or_sensor: Union[Device, Sensor], install_command: str, l
     cb = device_or_sensor._cb
 
     offline = False
-    timeout = 1200  # default 20 minutes (same used by Cb)
+    timeout = 900  # default 15 minutes (same used by Cb)
     if device and not is_device_online(device):
         # Decision point: if the device is NOT online, give the analyst and option to wait
         logger.warning(f"{device.id}:{device.name} is offline.")
@@ -170,18 +170,18 @@ def deploy_lerc(device_or_sensor: Union[Device, Sensor], install_command: str, l
         timeout = timeout * 86400
 
     logger.info(f"waiting for active session on device ...")
-    session_manager = CustomLiveResponseSessionManager(cb, custom_session_keepalive=True)
+    session_manager = CustomLiveResponseSessionManager(cb, custom_session_keepalive=False)
     if not session_manager.wait_for_active_session(device_or_sensor, timeout=timeout):
         logger.error(f"reached timeout waiting for active session.")
         return False
     
-    download = PutFile(lerc_installer_path, 'lercSetup.msi')
+    download = PutFile(lerc_installer_path, 'C:\\Windows\\System32\\lercSetup.msi')
     execute = ExecuteCommand(install_command, wait_for_output=False, wait_timeout=60, wait_for_completion=True)
 
     logger.info(f"submitting commands to download and install lerc.") 
     if previously_installed:
         # delete any old msi package, just in-case
-        session_manager.submit_command(DeleteFile('lercSetup.msi'), device_or_sensor)
+        session_manager.submit_command(DeleteFile('C:\\Windows\\System32\\lercSetup.msi'), device_or_sensor)
     session_manager.submit_command(download, device_or_sensor)
     session_manager.submit_command(execute, device_or_sensor)
     session_manager.process_completed_commands() # wait

@@ -324,25 +324,24 @@ def main():
             sys.exit(0)
         logger.info("Attempting to deploy lerc with CarbonBlack..")
         try:
-            from cbapi.response import CbResponseAPI
-            from cbapi.psc.threathunter import CbThreatHunterAPI
+            from cbc_sdk import CBCloudAPI
             from cbinterface.cli import load_configured_environments
-            from cbinterface.psc.device import find_device_by_hostname
+            from cbinterface.enterprise_edr.device import find_device_by_hostname
             from lerc_control.deploy_lerc import deploy_lerc, CbSensor_search
-        except:
-            logger.error("Failed to import deployment functions. Install and configure cbinterface, if you have Carbon Black.")
+        except Exception as e:
+            logger.error(f"{e}Failed to import deployment functions. Install and configure cbinterface, if you have Carbon Black.")
             sys.exit(1)
         logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.ERROR)
 
         device_or_sensor = None
         configured_environments = load_configured_environments()
-        if "psc" in configured_environments or "cbc" in configured_environments:
+        if "enterprise_edr" in configured_environments or "cbc" in configured_environments:
             # search here first
             logger.info(f"searching for device...")
-            profiles = configured_environments.get("psc", [])
+            profiles = configured_environments.get("enterprise_edr", [])
             profiles.extend(configured_environments.get("cbc", []))
             for profile in profiles:
-                cb = CbThreatHunterAPI(profile=profile)
+                cb = CBCloudAPI(profile=profile)
                 device_or_sensor = find_device_by_hostname(cb, args.hostname)
                 if device_or_sensor:
                     break
@@ -509,8 +508,8 @@ def main():
     # Else, see if we're running a command directly
     cmd = None
     if args.instruction == 'run':
-        if args.async:
-            cmd = client.Run(args.command, async=args.async)
+        if args.asynchronous:
+            cmd = client.Run(args.command, asynchronous=args.asynchronous)
         else:
             cmd = client.Run(args.command)
 

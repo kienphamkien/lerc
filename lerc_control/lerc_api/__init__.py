@@ -241,13 +241,13 @@ class Client():
             return False
 
 
-    def Run(self, shell_command, async=False):
+    def Run(self, shell_command, asynchronous=False):
         """Execute a shell command on the host.
 
         :param str shell_command: The command to run on the host
         :param bool async: (optional) ``False``: LERC client will stream any results and  wait until for completion. ``True``: Execute the command and return immediately.
         """
-        command = { "operation":"run", "command": shell_command, "async": async }
+        command = { "operation":"run", "command": shell_command, "async": asynchronous }
         return self._issue_command(command)
 
     def Download(self, server_file_path, client_file_path=None, analyst_file_path=None):
@@ -348,7 +348,7 @@ class Client():
         self.Run('del {}'.format(bat_name))
 
         self.Download(safe_contain_bat_path)
-        containment_command = self.Run(contain_cmd.format(int(self.sleep_cycle)+5), async=True)
+        containment_command = self.Run(contain_cmd.format(int(self.sleep_cycle)+5), asynchronous=True)
 
         # Dummy command to give the containment command enough time to execute before lerc kills it with wmic
         flag_cmd = self.Run("dir")
