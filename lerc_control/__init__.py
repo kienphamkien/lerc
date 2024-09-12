@@ -102,7 +102,7 @@ def main():
     parser_run = subparsers.add_parser('run', help="Run a shell command on the host.")
     parser_run.add_argument('hostname', help="the host you'd like to work with")
     parser_run.add_argument('command', help='The shell command for the host to execute`')
-    parser_run.add_argument('-a', '--async', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
+    parser_run.add_argument('-a', '--asynchronous', action='store_true', help='Set asynchronous to true (do NOT wait for output or command to complete)')
     parser_run.add_argument('-p', '--print-only', action='store_true', help='Only print results to screen.')
     parser_run.add_argument('-w', '--write-only', action='store_true', help='Only write results to file.')
     parser_run.add_argument('-o', '--output-filename', default=None, action='store', help='Specify the name of the file to write any results to.')
@@ -324,25 +324,24 @@ def main():
             sys.exit(0)
         logger.info("Attempting to deploy lerc with CarbonBlack..")
         try:
-            from cbapi.response import CbResponseAPI
-            from cbapi.psc.threathunter import CbThreatHunterAPI
+            from cbc_sdk import CBCloudAPI
             from cbinterface.cli import load_configured_environments
-            from cbinterface.psc.device import find_device_by_hostname
+            from cbinterface.enterprise_edr.device import find_device_by_hostname
             from lerc_control.deploy_lerc import deploy_lerc, CbSensor_search
-        except:
-            logger.error("Failed to import deployment functions. Install and configure cbinterface, if you have Carbon Black.")
+        except Exception as e:
+            logger.error(f"{e}Failed to import deployment functions. Install and configure cbinterface, if you have Carbon Black.")
             sys.exit(1)
         logging.getLogger('lerc_control.deploy_lerc').setLevel(logging.ERROR)
 
         device_or_sensor = None
         configured_environments = load_configured_environments()
-        if "psc" in configured_environments or "cbc" in configured_environments:
+        if "enterprise_edr" in configured_environments or "cbc" in configured_environments:
             # search here first
             logger.info(f"searching for device...")
-            profiles = configured_environments.get("psc", [])
+            profiles = configured_environments.get("enterprise_edr", [])
             profiles.extend(configured_environments.get("cbc", []))
             for profile in profiles:
-                cb = CbThreatHunterAPI(profile=profile)
+                cb = CBCloudAPI(profile=profile)
                 device_or_sensor = find_device_by_hostname(cb, args.hostname)
                 if device_or_sensor:
                     break
@@ -509,8 +508,8 @@ def main():
     # Else, see if we're running a command directly
     cmd = None
     if args.instruction == 'run':
-        if args.async:
-            cmd = client.Run(args.command, async=args.async)
+        if args.asynchronous:
+            cmd = client.Run(args.command, asynchronous=args.asynchronous)
         else:
             cmd = client.Run(args.command)
 

@@ -182,7 +182,7 @@ def execute_script(lerc, script_path, return_result_commands=False, execute_clea
                     # assuming we never will want to async_run OR write_results_path OR print_results
                     COMMON_CLEANUP_COMMANDS['RUN'].append(run_string)
                 continue
-            cmd = lerc.Run(run_string, async=async_run)
+            cmd = lerc.Run(run_string, asynchronous=async_run)
             command_history[command] = cmd
             command_history[command].get_the_results = get_results
             command_history[command].write_results_path = write_results_path
