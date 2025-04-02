@@ -35,7 +35,7 @@ def upgrade_host(hostname, upgrade_bat_path, lerc_msi_path):
 
       #. Drop lercSetup.msi
       #. Drop upgrade.bat 
-      #. Execute upgrade.bat async=True with correct params ex. -> upgrade.bat 0 15 2048 "https://your-server-address/"  -> company=0 reconnectdelay=15 chunksize=2048 serverurls="https://your-server-address/"
+      #. Execute upgrade.bat async_run=True with correct params ex. -> upgrade.bat 0 15 2048 "https://your-server-address/"  -> company=0 reconnectdelay=15 chunksize=2048 serverurls="https://your-server-address/"
       #. Issue Quit command to host
     """
 
@@ -62,7 +62,7 @@ def upgrade_host(hostname, upgrade_bat_path, lerc_msi_path):
     host_commands.append(result)
 
     run_cmd = config['default']['upgrade_cmd']
-    result = host.Run(run_cmd.format(host.id), async=True)
+    result = host.Run(run_cmd.format(host.id), async_run=True)
     host_commands.append(result)
 
     result = host.Quit()

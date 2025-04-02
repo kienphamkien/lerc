@@ -267,7 +267,7 @@ class Fetch(Resource):
         if command:
             logger.info("Issuing {} to {}".format(command.operation, command.hostname))
             if command.operation == operationTypes.RUN:
-                return ci.Run(command.command_id, command.command, async=command.async_run)
+                return ci.Run(command.command_id, command.command, async_run=command.async_run)
             elif command.operation == operationTypes.UPLOAD:
                 return ci.Upload(command.command_id, command.client_file_path, command.file_position)
             elif command.operation == operationTypes.DOWNLOAD:
