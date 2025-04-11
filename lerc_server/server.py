@@ -7,7 +7,7 @@ import logging
 import pytz
 import configparser
 from hashlib import md5
-from datetime import datetime
+from datetime import datetime, timedelta, UTC
 from flask_restful import Resource, Api
 from flask import Flask, request, jsonify, stream_with_context, Response, make_response
 
@@ -119,8 +119,8 @@ def host_check(host, company, version=None):
     elif client.status == clientStatusTypes.UNINSTALLED:
         logger.info("Client being re-installed.")
         client.status = clientStatusTypes.ONLINE
-        client.install_date = datetime.utcnow()
-        client.last_activity = datetime.utcnow()
+        client.install_date = datetime.now(UTC)
+        client.last_activity = datetime.now(UTC)
         client.company_id=company
         client.sleep_cycle=15
         db.session.commit()
@@ -130,7 +130,7 @@ def host_check(host, company, version=None):
             logger.info("setting company_id for {}".format(host))
             client.company_id = company
             client.status = clientStatusTypes.ONLINE
-            client.last_activity = datetime.utcnow()
+            client.last_activity = datetime.now(UTC)
             db.session.commit()
             return client
         logger.error("Company id mismatch for {}. Two clients with the same hostname in different environments?".format(host))
@@ -139,7 +139,7 @@ def host_check(host, company, version=None):
         return False
     else:
         client.status = clientStatusTypes.ONLINE
-        client.last_activity = datetime.utcnow()
+        client.last_activity = datetime.now(UTC)
         client.version = version
         db.session.commit()
         return client
@@ -157,7 +157,7 @@ def command_manager(host, remove_cid=None):
         # XXX Maybe write code that attempts to recover the STARTED but not COMPLETE command
         logger.error("{} fetched without finishing CID={} - Changing command statue to UNKNOWN.".format(started_command.hostname, started_command.command_id))
         started_command.status = cmdStatusTypes.UNKNOWN
-        started_command.evaluated_time = datetime.utcnow()
+        started_command.evaluated_time = datetime.now(UTC)
         db.session.commit()
     # Any open commands?
     command = Commands.query.filter(Commands.hostname==host).filter(Commands.status==cmdStatusTypes.PENDING).order_by(Commands.command_id.asc()).first()
@@ -274,7 +274,7 @@ class Fetch(Resource):
                 return ci.Download(command.command_id, command.client_file_path)
             elif command.operation == operationTypes.QUIT:
                 command.status = cmdStatusTypes.COMPLETE
-                command.evaluated_time = datetime.utcnow()
+                command.evaluated_time = datetime.now(UTC)
                 client = Clients.query.filter_by(hostname=host).first()
                 client.status = clientStatusTypes.UNINSTALLED
                 db.session.commit()
@@ -311,7 +311,7 @@ class Pipe(Resource):
         # update last_activity and status
         client = Clients.query.filter_by(hostname=host).one()
         client.status = clientStatusTypes.BUSY
-        client.last_activity = datetime.utcnow()
+        client.last_activity = datetime.now(UTC)
         db.session.commit()
 
         # Note: the client posts run results as they come in or after a certain timeout with no output from running command
@@ -328,18 +328,18 @@ class Pipe(Resource):
         if command.status == cmdStatusTypes.PENDING:
             if cmd_status_flag_done:
                 command.status = cmdStatusTypes.COMPLETE
-                command.evaluated_time = datetime.utcnow()
+                command.evaluated_time = datetime.now(UTC)
                 logging.info("Command status set to COMPLETE for command {}".format(cid))
             elif 'done' not in request.args:
                 logging.warning("DONE flag missing from arguments for command {}".format(cid))
                 command.status = cmdStatusTypes.COMPLETE
-                command.evaluated_time = datetime.utcnow()
+                command.evaluated_time = datetime.now(UTC)
             else:
                 command.status = cmdStatusTypes.STARTED
                 logging.info("Command status set to STARTED for command {}".format(cid))
         if command.status == cmdStatusTypes.STARTED and cmd_status_flag_done:
             command.status = cmdStatusTypes.COMPLETE
-            command.evaluated_time = datetime.utcnow()
+            command.evaluated_time = datetime.now(UTC)
             logging.info("Command status set to COMPLETE for command {}".format(cid))
         #statinfo = os.stat(os.path.join(BASE_DIR, command.server_file_path))
         db.session.commit()
@@ -372,7 +372,7 @@ class Upload(Resource):
         # update last_activity and status
         client = Clients.query.filter_by(hostname=host).one()
         client.status = clientStatusTypes.BUSY
-        client.last_activity = datetime.utcnow()
+        client.last_activity = datetime.now(UTC)
         db.session.commit()
         stream_error = receive_streamed_data(command)
 
@@ -389,13 +389,13 @@ class Upload(Resource):
             logger.info("Upload command {} completed sucessfully - file: {}".format(command.command_id,
                                                                                     command.server_file_path))
             command.status = cmdStatusTypes.COMPLETE
-            command.evaluated_time = datetime.utcnow()
+            command.evaluated_time = datetime.now(UTC)
             db.session.commit()
         else:
             logger.warn("{} indicates upload command {} complete, however, {}/{} filesize mismatch".format(host, command.command_id,
                                                                                                statinfo.st_size, command.filesize))
             command.status = cmdStatusTypes.UNKNOWN
-            command.evaluated_time = datetime.utcnow()
+            command.evaluated_time = datetime.now(UTC)
             db.session.commit()
         return True
 
@@ -418,7 +418,7 @@ class Download(Resource):
         except FileNotFoundError as e:
             logger.error("FileNotFoundError: {} on this server".format(str(e)))
             command.status = cmdStatusTypes.ERROR
-            command.evaluated_time = datetime.utcnow()
+            command.evaluated_time = datetime.now(UTC)
             command.log_file_path = "FileNotFoundError"
             db.session.commit()
             return Response()
@@ -426,7 +426,7 @@ class Download(Resource):
         if command.file_position == statinfo.st_size:
             logger.warning("File at same path and of same size is already on {}. Previously repeated command?".format(host))
             command.status = cmdStatusTypes.COMPLETE
-            command.evaluated_time = datetime.utcnow()
+            command.evaluated_time = datetime.now(UTC)
             db.session.commit()
             logger.info("Download command {} completed successfully".format(command.command_id))
             return Response()
@@ -446,7 +446,7 @@ class Download(Resource):
 
             if error_message is None:
                 command.status = cmdStatusTypes.COMPLETE
-                command.evaluated_time = datetime.utcnow()
+                command.evaluated_time = datetime.now(UTC)
                 db.session.commit()
                 logger.info("Download command {} completed successfully".format(command.command_id))
             else:
@@ -458,7 +458,7 @@ class Download(Resource):
         # update last_activity and status
         client = Clients.query.filter_by(hostname=host).one()
         client.status = clientStatusTypes.BUSY
-        client.last_activity = datetime.utcnow()
+        client.last_activity = datetime.now(UTC)
         db.session.commit()
         return Response(stream_with_context(stream_response()))
 
@@ -501,10 +501,10 @@ class Error(Resource):
             command.status = cmdStatusTypes.PENDING
         else:
             command.status = cmdStatusTypes.ERROR
-            command.evaluated_time = datetime.utcnow()
+            command.evaluated_time = datetime.now(UTC)
         # update last_activity
         client = Clients.query.filter_by(hostname=host).one()
-        client.last_activity = datetime.utcnow()
+        client.last_activity = datetime.now(UTC)
         db.session.commit()
         error_log = {'time': datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M:%S%z'),
                      'command_id': str(command.command_id),
@@ -822,7 +822,7 @@ class CancelCommand(Resource):
         command = Commands.query.filter(Commands.command_id==command_id).one()
         if command:
             command.status = cmdStatusTypes.CANCELED
-            command.evaluated_time = datetime.utcnow()
+            command.evaluated_time = datetime.now(UTC)
             db.session.commit()
             return command.to_dict()
         return {'status_code':'404',
@@ -881,7 +881,7 @@ class AnalystUpload(Resource):
             logger.error("{} indicates upload command {} complete, however, {}/{} filesize mismatch".format(host, command.command_id,
                                                                                                   statinfo.st_size, command.filesize))
             command.status = cmdStatusTypes.UNKNOWN
-            command.evaluated_time = datetime.utcnow()
+            command.evaluated_time = datetime.now(UTC)
             db.session.commit()
 
         return command.to_dict()
