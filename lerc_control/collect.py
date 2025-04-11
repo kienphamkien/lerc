@@ -206,10 +206,10 @@ def full_collection(lerc):
 
     logger.info("Starting full Live Response collection on {}.".format(lerc.hostname))
 
-    # for contriving the output filename
-    local_date_str_cmd = lerc.Run('date /t')
     # Delete any existing LR artifacts
-    lerc.Run("DEL /S /F /Q lr && rmdir /S /Q lr")
+    lerc.Run("DEL /F /Q lr.exe && DEL /S /F /Q lr && rmdir /S /Q lr")
+    # for contriving the output filename
+    local_date_str_cmd = lerc.Run('powershell -NoProfile -Command "Get-Date -Format \'yyyyMMdd\'"')
     # download the package
     lr_download = lerc.Download(lr_path)
     logger.info("Issued CID={} for client to download {}.".format(lr_download.id, lr_path))
@@ -226,14 +226,8 @@ def full_collection(lerc):
         if local_date_str_cmd.status == 'COMPLETE':
             dateStr = local_date_str_cmd.get_results(return_content=True).decode('utf-8')
             logger.debug("Got date string of '{}'".format(dateStr))
-            try:
-                # Mon 11/19/2018 -> 20181119 
-                dateStr = dateStr.split(' ')[1].split('/')
-                dateStr =  dateStr[2]+dateStr[0]+dateStr[1]
-                 # hostname.upper() because streamline.py expects uppercase
-                output_filename = lerc.hostname.upper() + "." + dateStr + ".7z"
-            except IndexError:
-                logger.warning("Unexpected date string obtained. Got '{}'".format(dateStr))
+            # hostname.upper() because streamline.py expects uppercase
+            output_filename = lerc.hostname.upper() + "." + dateStr.strip() + ".7z"
             break
         # wait five seconds before asking the server again
         time.sleep(5)
