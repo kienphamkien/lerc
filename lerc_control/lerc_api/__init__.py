@@ -102,10 +102,10 @@ for key,value in QUERY_FIELD_DICT.items():
     QUERY_FIELD_DESCRIPTIONS.append({'field': key, 'description': QUERY_FIELD_DICT[key]})
 
 def parse_lerc_server_query(query_str):
-    """This function converts a string from field:value pairs into \*\*args that lerc_session.query can recognize.
+    """This function converts a string from field:value pairs into args that lerc_session.query can recognize.
 
     :param str query_str: A query string to be parsed.
-    :return: \*\*args ready for lerc_session.Query()
+    :return: args ready for lerc_session.Query()
     """
     logger = logging.getLogger(__name__+".parse_lerc_server_query")
     query_parts = query_str.split()
@@ -297,7 +297,7 @@ class Client():
         for line in dir_lines:
             content = {}
             if line:
-                if line[2] == '/':
+                if line[2] == '/' or line[2] == '-':
                     content['name'] = line[line.rfind(' ')+1:]
                     if 'DIR' in line:
                         content['type'] = 'DIR'
