@@ -3,3 +3,4 @@ flask_restful
 flask_sqlalchemy
 pymysql
 pytz
+cryptography
