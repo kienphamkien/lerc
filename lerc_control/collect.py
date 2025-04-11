@@ -6,6 +6,7 @@ import shlex
 import pprint
 import logging
 import configparser
+import sys
 
 from lerc_control.scripted import load_script, execute_script
 from lerc_control import lerc_api
@@ -287,7 +288,7 @@ def full_collection(lerc):
     upload_command.get_results(file_path=output_filename)
     # Call steamline on the 7z lr package
     logger.info("[+] Starting streamline on {}".format(output_filename))
-    args = shlex.split(streamline_path + " " + output_filename)
+    args = shlex.split(f"{sys.executable} {streamline_path} {output_filename}")
     try:
         subprocess.Popen(args).wait()
         logger.info("[+] Streamline complete")
