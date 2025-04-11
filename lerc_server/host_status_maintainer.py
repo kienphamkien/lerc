@@ -7,7 +7,7 @@ import configparser
 import pymysql
 import pymysql.cursors
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -26,8 +26,13 @@ DB_userpass = config['lerc_server']['dbuserpass']
 offline_timeout = int(config['host_checker']['offline_timeout'])
 
 # Connect to Db
-db = pymysql.connect(DB_server, DB_user, DB_userpass, "lerc", 
-                                        cursorclass=pymysql.cursors.DictCursor)
+db = pymysql.connect(
+    host=DB_server,
+    user=DB_user,
+    password=DB_userpass,
+    database="lerc",
+    cursorclass=pymysql.cursors.DictCursor
+)
 
 # configure some logging
 logging.basicConfig(format='[%(levelname)s] %(asctime)s - %(name)s - %(message)s',
@@ -46,21 +51,17 @@ def status_update():
             c.execute("SELECT * FROM clients")
             for client in c.fetchall():
                 if client['status'] == "BUSY":
-                    away_time = datetime.utcnow() - client['last_activity']
+                    away_time = datetime.now(UTC) - client['last_activity'].replace(tzinfo=UTC)
                     with db.cursor() as tmp_c:
                         tmp_c.execute("SELECT operation,command_id FROM commands WHERE hostname='{}' AND status='STARTED'".format(client['hostname']))
                         command = tmp_c.fetchone()
                         if command is None:
                             LOGGER.error("{} is in BUSY state with no STARTED commands in queue. Away time='{}' - Setting UNKNOWN".format(client['hostname'], away_time))
                             tmp_c.execute("UPDATE clients SET status='UNKNOWN' WHERE hostname='{}'".format(client['hostname']))
-                        elif away_time > timedelta(seconds=client['sleep_cycle']+2):
-                            c.execute("UPDATE clients SET status='OFFLINE' WHERE hostname='{}'".format(client['hostname']))
-                            LOGGER.info("Set {} to OFFLINE: Exceeded it's next expected check-in by '{}'".format(client['hostname'],
-                                                                         str(away_time - timedelta(seconds=client['sleep_cycle']))))
                         else:
                             LOGGER.info("{} is in a BUSY state working on CID={} since '{}'".format(client['hostname'], command['command_id'], client['last_activity']))
                 elif client['status'] != "UNKNOWN" and client['status'] != "UNINSTALLED" and client['status'] != "OFFLINE":
-                    away_time = datetime.utcnow() - client['last_activity']
+                    away_time = datetime.now(UTC) - client['last_activity'].replace(tzinfo=UTC)
                     LOGGER.debug("{} hasn't fetched in '{}'".format(client['hostname'], away_time))
                     if away_time > timedelta(days=offline_timeout):
                         c.execute("UPDATE clients SET status='UNKNOWN' WHERE hostname='{}'".format(client['hostname']))
@@ -76,9 +77,8 @@ def status_update():
     return
 
 if __name__ == '__main__':
-
     status_update()
-    time.sleep(30)
+    time.sleep(25)
     status_update()
     db.close()
 
