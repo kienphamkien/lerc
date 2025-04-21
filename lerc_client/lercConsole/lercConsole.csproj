@@ -59,8 +59,8 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>copy /Y $(SolutionDir)certs\lerc.ca.pem $(TargetDir)lerc.ca.pem
-copy /Y $(SolutionDir)certs\lerc.client.pfx $(TargetDir)lerc.client.pfx</PostBuildEvent>
+    <PostBuildEvent>copy /Y "$(SolutionDir)certs\lerc.ca.pem" "$(TargetDir)lerc.ca.pem"
+copy /Y "$(SolutionDir)certs\lerc.client.pfx" "$(TargetDir)lerc.client.pfx"</PostBuildEvent>
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
